@@ -483,6 +483,267 @@ initSocket();
      GESTURE  (inline IIFE — no separate file needed)
      ================================================================ -->
 <script>
+var ICE_SERVERS = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" }
+  ]
+};
+var CHUNK_SIZE = 65536;
+
+var socket, pc = null, dc = null, peerId = null;
+var rxBuf = { chunks: [], meta: null };
+
+var statusDot      = document.getElementById("statusDot");
+var statusText     = document.getElementById("statusText");
+var connectBtn     = document.getElementById("connectBtn");
+var cancelBtn      = document.getElementById("cancelBtn");
+var disconnectBtn  = document.getElementById("disconnectBtn");
+var sendCard       = document.getElementById("sendCard");
+var receiveCard    = document.getElementById("receiveCard");
+var receivedArea   = document.getElementById("receivedArea");
+var dropZone       = document.getElementById("dropZone");
+var fileInput      = document.getElementById("fileInput");
+var ghostBtn       = document.getElementById("ghostPickerBtn");
+var ghostInput     = document.getElementById("ghostFileInput");
+var fileReadyBanner= document.getElementById("fileReadyBanner");
+var sendBtn        = document.getElementById("sendBtn");
+var progressWrap   = document.getElementById("progressWrap");
+var progressBar    = document.getElementById("progressBar");
+var progressLbl    = document.getElementById("progressLbl");
+var logEl          = document.getElementById("log");
+var peerStatus     = document.getElementById("peerStatus");
+
+var gestureState = { filesReady: false };
+var stagedFiles = [];
+
+function write(msg, type) {
+  var d = document.createElement("div");
+  d.className   = type || "";
+  d.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setServer(ok) {
+  statusDot.style.background = ok ? "#4ade80" : "#ff4d6d";
+  statusText.textContent     = ok ? "Server connected ✔" : "Disconnected ❌";
+}
+
+function setState(s) {
+  connectBtn.classList.add("hidden");
+  cancelBtn.classList.add("hidden");
+  disconnectBtn.classList.add("hidden");
+  sendCard.classList.add("hidden");
+  peerStatus.textContent = "";
+  if (s === "idle") {
+    connectBtn.classList.remove("hidden");
+  } else if (s === "searching") {
+    cancelBtn.classList.remove("hidden");
+    peerStatus.textContent = "🔍 Searching for a peer...";
+  } else if (s === "connected") {
+    disconnectBtn.classList.remove("hidden");
+    sendCard.classList.remove("hidden");
+    peerStatus.textContent = "✅ Peer connected — send files below!";
+  }
+}
+
+function stageFiles(files) {
+  stagedFiles = Array.from(files);
+  gestureState.filesReady = true;
+  dropZone.classList.add("file-ready");
+  fileReadyBanner.textContent = "✅ " + stagedFiles.length + " file(s) ready";
+  sendBtn.classList.remove("hidden");
+  write(stagedFiles.length + " file(s) staged", "info");
+}
+
+function clearStaged() {
+  stagedFiles = [];
+  gestureState.filesReady = false;
+  dropZone.classList.remove("file-ready");
+  fileReadyBanner.textContent = "";
+  sendBtn.classList.add("hidden");
+  fileInput.value = "";
+}
+
+function sendStagedFiles() {
+  if (stagedFiles.length === 0) {
+    write("No files staged.", "error"); return;
+  }
+  stagedFiles.forEach(sendFile);
+  clearStaged();
+}
+
+function gestureSendFiles() { sendStagedFiles(); }
+
+function initSocket() {
+  socket = io(window.location.origin);
+  socket.on("connect",          function() { setServer(true);  setState("idle"); write("Connected to server", "success"); });
+  socket.on("disconnect",       function() { setServer(false); write("Disconnected", "error"); });
+  socket.on("connect_error",    function(e){ write("Socket error: " + e.message, "error"); });
+  socket.on("waiting",          function() { setState("searching"); write("Waiting for peer...", "info"); });
+  socket.on("search-cancelled", function() { setState("idle"); write("Search cancelled", "info"); });
+  socket.on("matched", function(d) {
+    peerId = d.peerId;
+    write("Matched! Connecting P2P...", "info");
+    setupPeer(d.initiator);
+  });
+  socket.on("offer", async function(d) {
+    if (!pc) setupPeer(false);
+    await pc.setRemoteDescription(new RTCSessionDescription(d.offer));
+    var ans = await pc.createAnswer();
+    await pc.setLocalDescription(ans);
+    socket.emit("answer", { to: d.from, answer: ans });
+  });
+  socket.on("answer", async function(d) {
+    if (pc) await pc.setRemoteDescription(new RTCSessionDescription(d.answer));
+  });
+  socket.on("ice-candidate", async function(d) {
+    if (pc) { try { await pc.addIceCandidate(new RTCIceCandidate(d.candidate)); } catch(e){} }
+  });
+  socket.on("peer-left", function() {
+    write("Peer disconnected", "error"); closePeer(); setState("idle");
+  });
+  socket.on("peer-grabbed", function() {
+    write("📦 Sender grabbed a file — open your palm to receive", "info");
+    peerStatus.textContent = "📦 Sender grabbed a file — open your palm to receive it";
+    window._airpopResetReceiver && window._airpopResetReceiver();
+  });
+  socket.on("peer-ready", function() {
+    write("🖐 Receiver is ready — sending file!", "info");
+    gestureSendFiles();
+  });
+}
+
+function setupPeer(initiator) {
+  pc = new RTCPeerConnection(ICE_SERVERS);
+  pc.onicecandidate = function(e) {
+    if (e.candidate) socket.emit("ice-candidate", { to: peerId, candidate: e.candidate });
+  };
+  pc.onconnectionstatechange = function() {
+    write("P2P: " + pc.connectionState, pc.connectionState === "connected" ? "success" : "");
+    if (pc.connectionState === "connected")  setState("connected");
+    if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+      write("P2P lost", "error"); closePeer(); setState("idle");
+    }
+  };
+  if (initiator) {
+    dc = pc.createDataChannel("airpop", { ordered: true });
+    setupDC(dc);
+    pc.createOffer().then(function(o) {
+      pc.setLocalDescription(o);
+      socket.emit("offer", { to: peerId, offer: o });
+    });
+  } else {
+    pc.ondatachannel = function(e) { dc = e.channel; setupDC(dc); };
+  }
+}
+
+function closePeer() {
+  if (pc) { pc.close(); pc = null; }
+  dc = null; peerId = null;
+}
+
+function setupDC(chan) {
+  chan.binaryType = "arraybuffer";
+  chan.onopen  = function() { write("File channel open ✔", "success"); };
+  chan.onclose = function() { write("File channel closed"); };
+  chan.onmessage = function(e) {
+    if (typeof e.data === "string") {
+      var msg = JSON.parse(e.data);
+      if (msg.type === "file-start") {
+        rxBuf = { chunks: [], meta: msg };
+        write("Receiving: " + msg.name + " (" + fmtSize(msg.size) + ")", "info");
+        receiveCard.classList.remove("hidden");
+      } else if (msg.type === "file-end") {
+        finalizeFile();
+      }
+    } else {
+      rxBuf.chunks.push(e.data);
+    }
+  };
+}
+
+function finalizeFile() {
+  var meta = rxBuf.meta;
+  var blob = new Blob(rxBuf.chunks, { type: meta.fileType });
+  var url  = URL.createObjectURL(blob);
+  if (meta.fileType.startsWith("image/")) {
+    var img = document.createElement("img"); img.src = url; img.title = meta.name;
+    receivedArea.appendChild(img);
+  } else if (meta.fileType.startsWith("video/")) {
+    var v = document.createElement("video"); v.src = url; v.controls = true;
+    receivedArea.appendChild(v);
+  } else {
+    var d = document.createElement("div"); d.className = "file-item";
+    d.innerHTML = "📄 <a href='" + url + "' download='" + meta.name + "'>" + meta.name + "</a> (" + fmtSize(meta.size) + ")";
+    receivedArea.appendChild(d);
+  }
+  write("Received: " + meta.name + " ✔", "success");
+  rxBuf = { chunks: [], meta: null };
+}
+
+function fmtSize(b) {
+  if (b < 1024)    return b + " B";
+  if (b < 1048576) return (b/1024).toFixed(1) + " KB";
+  return (b/1048576).toFixed(1) + " MB";
+}
+
+async function sendFile(file) {
+  if (!dc || dc.readyState !== "open") { write("Data channel not open.", "error"); return; }
+  write("Sending: " + file.name + " (" + fmtSize(file.size) + ")", "info");
+  var buf   = await file.arrayBuffer();
+  var total = Math.ceil(buf.byteLength / CHUNK_SIZE);
+  progressWrap.style.display = "block";
+  dc.send(JSON.stringify({ type:"file-start", name:file.name, size:buf.byteLength, fileType:file.type||"application/octet-stream" }));
+  for (var i = 0; i < total; i++) {
+    var start = i * CHUNK_SIZE;
+    var chunk = buf.slice(start, start + CHUNK_SIZE);
+    while (dc.bufferedAmount > 1048576) { await new Promise(function(r){ setTimeout(r,50); }); }
+    dc.send(chunk);
+    var pct = Math.round(((i+1)/total)*100);
+    progressBar.style.width = pct + "%";
+    progressLbl.textContent = file.name + " — " + pct + "%";
+  }
+  dc.send(JSON.stringify({ type:"file-end" }));
+  write("Sent: " + file.name + " ✔", "success");
+  setTimeout(function() {
+    progressWrap.style.display = "none";
+    progressBar.style.width = "0";
+    progressLbl.textContent = "";
+  }, 2000);
+}
+
+connectBtn.addEventListener("click",    function(){ socket.emit("find-peer"); setState("searching"); write("Searching...", "info"); });
+cancelBtn.addEventListener("click",     function(){ socket.emit("cancel-search"); });
+disconnectBtn.addEventListener("click", function(){ closePeer(); setState("idle"); write("Disconnected", "info"); });
+sendBtn.addEventListener("click",       function(){ sendStagedFiles(); });
+
+dropZone.addEventListener("click", function(){ fileInput.click(); });
+dropZone.addEventListener("dragover",  function(e){ e.preventDefault(); dropZone.classList.add("dragover"); });
+dropZone.addEventListener("dragleave", function(){  dropZone.classList.remove("dragover"); });
+dropZone.addEventListener("drop", function(e) {
+  e.preventDefault();
+  dropZone.classList.remove("dragover");
+  if (e.dataTransfer.files.length) stageFiles(e.dataTransfer.files);
+});
+
+fileInput.addEventListener("change", function() {
+  if (fileInput.files.length > 0) stageFiles(fileInput.files);
+});
+
+ghostInput.addEventListener("change", function() {
+  if (ghostInput.files.length > 0) stageFiles(ghostInput.files);
+});
+
+initSocket();
+</script>
+
+<!-- ================================================================
+     GESTURE
+     ================================================================ -->
+<script>
 (function() {
 
 var CFG = {
@@ -503,6 +764,11 @@ var isGrabbing = false, hasSent = false;
 var lastWristZ = null, pushCooldown = 0;
 var firstPushAt = null, pushCount = 0, pushTimer = null;
 
+window._airpopResetReceiver = function() {
+  hasSent = false;
+  sendCount = 0;
+};
+
 function el(id){ return document.getElementById(id); }
 
 function overDropZone(x, y) {
@@ -510,7 +776,6 @@ function overDropZone(x, y) {
   return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 }
 
-/* finger curl: tip closer to wrist than knuckle */
 function isCurled(lm, tipIdx, mcpIdx) {
   var w = lm[0], t = lm[tipIdx], m = lm[mcpIdx];
   var td = Math.sqrt((t.x-w.x)*(t.x-w.x)+(t.y-w.y)*(t.y-w.y)+(t.z-w.z)*(t.z-w.z));
@@ -556,7 +821,6 @@ function onPush(pos) {
   setTimeout(function(){ flash.style.opacity = "0"; }, 140);
 
   if (pushCount === 0 || (now - firstPushAt) > CFG.doublePushMs) {
-    /* ---- first push ---- */
     pushCount = 1; firstPushAt = now;
     badge.textContent = "👆 1"; badge.style.opacity = "1";
     if (on_dz) dropZone.classList.add("gesture-hover");
@@ -566,7 +830,6 @@ function onPush(pos) {
       dropZone.classList.remove("gesture-hover");
     }, CFG.doublePushMs);
   } else {
-    /* ---- second push = double-push confirmed ---- */
     pushCount = 0; firstPushAt = null;
     clearTimeout(pushTimer);
     dropZone.classList.remove("gesture-hover");
@@ -575,28 +838,18 @@ function onPush(pos) {
 
     if (on_dz) {
       write("👆 Double-push — opening file picker", "info");
-      /*
-        Option 1+3 combo:
-        Move the ghost <button> + <input> directly under the cursor,
-        then fire a real MouseEvent at those exact coordinates.
-        The browser sees a genuine pointer interaction on a real
-        file input element and allows the picker to open.
-      */
       var gb = document.getElementById("ghostPickerBtn");
       var gi = document.getElementById("ghostFileInput");
-      /* position the ghost button centered on the cursor */
       gb.style.left          = (pos.x - 30) + "px";
       gb.style.top           = (pos.y - 30) + "px";
       gb.style.width         = "60px";
       gb.style.height        = "60px";
       gb.style.pointerEvents = "auto";
-      /* fire a real trusted-looking click directly on the input */
       gi.dispatchEvent(new MouseEvent("click", {
         bubbles: true, cancelable: true,
         clientX: pos.x, clientY: pos.y,
         view: window
       }));
-      /* hide ghost again after a tick */
       setTimeout(function(){
         gb.style.pointerEvents = "none";
         gb.style.width  = "1px";
@@ -656,16 +909,16 @@ function handleGesture(gesture, pos, lm) {
     cursor.style.boxShadow  = "0 0 18px rgba(255,77,109,.8)";
     cursor.style.transform  = "translate(-50%,-50%) scale(1.4)";
     if (grabCount >= CFG.grabFrames && !isGrabbing) {
-  if (gestureState.filesReady) {
-    isGrabbing = true; hasSent = false;
-    label.textContent = "✊ Grabbed! Other device — open palm to receive";
-    write("✊ Grabbed — waiting for receiver to open palm!", "info");
-    socket.emit("grab-gesture", { to: peerId });
+      if (gestureState.filesReady) {
+        isGrabbing = true; hasSent = false;
+        label.textContent = "✊ Grabbed! Other device — open palm to receive";
+        write("✊ Grabbed — waiting for receiver to open palm!", "info");
+        socket.emit("grab-gesture", { to: peerId });
       } else {
         label.textContent = "⚠️ Pick a file first";
       }
     }
-   } else if (gesture === "open" && !isGrabbing) {
+  } else if (gesture === "open" && !isGrabbing) {
     sendCount++; grabCount = 0;
     cursor.style.background = "rgba(74,222,128,.9)";
     cursor.style.boxShadow  = "0 0 18px rgba(74,222,128,.8)";
@@ -685,7 +938,7 @@ function handleGesture(gesture, pos, lm) {
     cursor.style.background = "rgba(120,220,255,.82)";
     cursor.style.boxShadow  = "0 0 14px rgba(120,220,255,.8)";
     cursor.style.transform  = "translate(-50%,-50%) scale(1)";
-    if      (isGrabbing)              label.textContent = "✊ Holding — open to send";
+    if      (isGrabbing)              label.textContent = "✊ Holding — other device open palm";
     else if (gestureState.filesReady) label.textContent = "✊ Fist to grab & send";
     else if (on_dz)                   label.textContent = "👆👆 Double-push to pick file";
     else                              label.textContent = "👆 Point to aim";
@@ -713,7 +966,6 @@ function drawSkeleton(canvas, lm, gesture) {
 }
 
 function buildUI() {
-  /* preview box */
   var box = document.createElement("div");
   box.id = "gBox";
   box.style.cssText = "position:fixed;bottom:20px;right:20px;width:220px;height:165px;" +
@@ -748,7 +1000,6 @@ function buildUI() {
   [vid,cvs,flash,badge,debug,label].forEach(function(n){ box.appendChild(n); });
   document.body.appendChild(box);
 
-  /* toggle button */
   var btn = document.createElement("button");
   btn.id="gToggle"; btn.textContent="✋ Gesture OFF";
   btn.style.cssText="position:fixed;bottom:196px;right:20px;padding:8px 16px;" +
@@ -757,7 +1008,6 @@ function buildUI() {
   btn.addEventListener("click", toggleGesture);
   document.body.appendChild(btn);
 
-  /* cursor dot */
   var cur = document.createElement("div");
   cur.id="gCursor";
   cur.style.cssText="position:fixed;width:26px;height:26px;border-radius:50%;" +
@@ -766,7 +1016,6 @@ function buildUI() {
     "box-shadow:0 0 14px rgba(120,220,255,.9);transition:background .1s,box-shadow .1s,transform .12s;";
   document.body.appendChild(cur);
 
-  /* ripple */
   var rip = document.createElement("div");
   rip.id="gRipple";
   rip.style.cssText="position:fixed;width:66px;height:66px;border-radius:50%;" +
@@ -781,7 +1030,6 @@ async function startGesture() {
   var cursor = el("gCursor");
   var label  = el("gLabel");
 
-  /* camera */
   try {
     var stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:"user", width:640, height:480 } });
     vid.srcObject = stream;
@@ -791,7 +1039,6 @@ async function startGesture() {
   } catch(err) {
     label.textContent = "Camera error ❌";
     write("Camera: " + err.message, "error");
-    /* re-enable toggle so user can retry */
     el("gToggle").textContent = "✋ Gesture OFF";
     el("gToggle").style.background = "rgba(120,220,255,.1)";
     return;
@@ -830,7 +1077,6 @@ async function startGesture() {
     }
   });
 
-  /* CRITICAL: initialize model before starting camera feed */
   await hands.initialize();
 
   var camera = new Camera(vid, {
@@ -849,7 +1095,6 @@ async function startGesture() {
 
 function toggleGesture() {
   if (!running) {
-    /* disable button while loading to prevent double-click */
     el("gToggle").textContent      = "Loading...";
     el("gToggle").style.background = "rgba(120,220,255,.08)";
     startGesture();
@@ -866,6 +1111,7 @@ function toggleGesture() {
 window.addEventListener("DOMContentLoaded", buildUI);
 
 })();
+</script>
 </script>
 
 </body>
