@@ -337,6 +337,16 @@ function initSocket() {
   socket.on("peer-left", function() {
     write("Peer disconnected", "error"); closePeer(); setState("idle");
   });
+socket.on("peer-grabbed", function() {
+  write("📦 Sender has grabbed a file — open your palm to receive", "info");
+  peerStatus.textContent = "📦 Sender grabbed a file — open your palm to receive it";
+});
+
+socket.on("peer-ready", function() {
+  write("🖐 Receiver is ready — releasing file!", "info");
+  gestureSendFiles();
+});
+
 }
 
 /* ---- WebRTC ---- */
@@ -646,23 +656,25 @@ function handleGesture(gesture, pos, lm) {
     cursor.style.boxShadow  = "0 0 18px rgba(255,77,109,.8)";
     cursor.style.transform  = "translate(-50%,-50%) scale(1.4)";
     if (grabCount >= CFG.grabFrames && !isGrabbing) {
-      if (gestureState.filesReady) {
-        isGrabbing = true; hasSent = false;
-        label.textContent = "✊ Grabbed! Open fist to send";
-        write("✊ Grabbed — open fist to send!", "info");
+  if (gestureState.filesReady) {
+    isGrabbing = true; hasSent = false;
+    label.textContent = "✊ Grabbed! Other device — open palm to receive";
+    write("✊ Grabbed — waiting for receiver to open palm!", "info");
+    socket.emit("grab-gesture", { to: peerId });
       } else {
         label.textContent = "⚠️ Pick a file first";
       }
     }
-  } else if (gesture === "open" && isGrabbing) {
+   } else if (gesture === "open" && !isGrabbing) {
     sendCount++; grabCount = 0;
     cursor.style.background = "rgba(74,222,128,.9)";
     cursor.style.boxShadow  = "0 0 18px rgba(74,222,128,.8)";
     cursor.style.transform  = "translate(-50%,-50%) scale(1.6)";
     if (sendCount >= CFG.sendFrames && !hasSent) {
-      hasSent = true; isGrabbing = false;
-      label.textContent = "🚀 Sending!";
-      gestureSendFiles();
+      hasSent = true;
+      label.textContent = "🖐 Ready to receive!";
+      write("🖐 Open palm detected — signalling sender!", "info");
+      socket.emit("ready-gesture", { to: peerId });
       setTimeout(function(){
         cursor.style.transform = "translate(-50%,-50%) scale(1)";
         label.textContent = "👆 Point to aim";

@@ -1,4 +1,4 @@
-// server.js — AirPop Live
+ // server.js — AirPop Live
 const express = require("express");
 const http    = require("http");
 const path    = require("path");
@@ -55,6 +55,10 @@ io.on("connection", (socket) => {
     if (waitingUser && waitingUser.id === socket.id) waitingUser = null;
     socket.emit("search-cancelled");
   });
+
+  // ── Gesture signals ──────────────────────────────────────────
+  socket.on("grab-gesture",  ({ to }) => io.to(to).emit("peer-grabbed"));
+  socket.on("ready-gesture", ({ to }) => io.to(to).emit("peer-ready"));
 
   socket.on("offer",         ({ to, offer })      => io.to(to).emit("offer",         { from: socket.id, offer }));
   socket.on("answer",        ({ to, answer })     => io.to(to).emit("answer",        { from: socket.id, answer }));
