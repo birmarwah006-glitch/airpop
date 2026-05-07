@@ -379,22 +379,19 @@ function setupDC(chan) {
         finalizeFile();
       }
     } else {
-      // ========== DECOMPRESS if needed ==========
-      var incoming = new Uint8Array(e.data);
-      var chunk = rxBuf.meta && rxBuf.meta.compressed
-        ? fzstd.decompress(incoming)
-        : incoming;
-      rxBuf.chunks.push(chunk);
+      // ========== DECOMPRESS if needed, otherwise keep raw ArrayBuffer ==========
+      if (rxBuf.meta && rxBuf.meta.compressed) {
+        rxBuf.chunks.push(fzstd.decompress(new Uint8Array(e.data)));
+      } else {
+        rxBuf.chunks.push(e.data); // raw ArrayBuffer — exactly like original
+      }
     }
   };
 }
 
 function finalizeFile() {
   var meta = rxBuf.meta;
-  var blob = new Blob(
-    rxBuf.chunks.map(function(c){ return c instanceof Uint8Array ? c : new Uint8Array(c); }),
-    { type: meta.fileType }
-  );
+  var blob = new Blob(rxBuf.chunks, { type: meta.fileType });
   var url = URL.createObjectURL(blob);
   if (meta.fileType.startsWith("image/")) {
     var img = document.createElement("img"); img.src = url; img.title = meta.name;
