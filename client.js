@@ -1,4 +1,4 @@
- // client.js — AirPop Live
+ // client.js — AirPop Live (with Zstd compression)
 
 const ICE_SERVERS = {
   iceServers: [
@@ -13,6 +13,13 @@ const ICE_SERVERS = {
 };
 
 const CHUNK_SIZE = 64 * 1024; // 64KB
+
+// ========== Compression ==========
+const SKIP_COMPRESS_TYPES = ["video/", "image/jpeg", "image/png", "image/webp", "application/zip"];
+
+function shouldCompress(fileType) {
+  return !SKIP_COMPRESS_TYPES.some(t => fileType.startsWith(t));
+}
 
 let socket;
 let pc = null;
@@ -184,21 +191,32 @@ function setupDataChannel(dc) {
       const msg = JSON.parse(data);
       if (msg.type === "file-start") {
         receiveBuffer = { chunks: [], meta: msg, received: 0 };
-        write(`Receiving: ${msg.name} (${formatSize(msg.size)})`, "info");
+        write(`Receiving: ${msg.name} (${formatSize(msg.size)})${msg.compressed ? " 🗜️ compressed" : ""}`, "info");
         receiveCard.classList.remove("hidden");
       } else if (msg.type === "file-end") {
         finalizeFile();
       }
     } else {
-      receiveBuffer.chunks.push(data);
-      receiveBuffer.received += data.byteLength;
+      // ========== DECOMPRESS if needed ==========
+      const incoming = new Uint8Array(data);
+      const chunk = receiveBuffer.meta?.compressed
+        ? fzstd.decompress(incoming)
+        : incoming;
+      receiveBuffer.chunks.push(chunk);
+      receiveBuffer.received += chunk.byteLength;
     }
   };
 }
 
 function finalizeFile() {
   const { chunks, meta } = receiveBuffer;
-  const blob = new Blob(chunks, { type: meta.fileType });
+
+  // chunks are Uint8Array — map just in case
+  const blob = new Blob(
+    chunks.map(c => c instanceof Uint8Array ? c : new Uint8Array(c)),
+    { type: meta.fileType }
+  );
+
   const url = URL.createObjectURL(blob);
 
   if (meta.fileType.startsWith("image/")) {
@@ -237,19 +255,30 @@ async function sendFile(file) {
 
   const buffer = await file.arrayBuffer();
   const totalChunks = Math.ceil(buffer.byteLength / CHUNK_SIZE);
+  const fileType = file.type || "application/octet-stream";
+  const compress = shouldCompress(fileType);
 
   sendProgressWrap.style.display = "block";
 
+  // ========== Send metadata (with compression flag) ==========
   dataChannel.send(JSON.stringify({
     type: "file-start",
     name: file.name,
     size: buffer.byteLength,
-    fileType: file.type || "application/octet-stream"
+    fileType,
+    compressed: compress
   }));
+
+  write(`Sending: ${file.name} ${compress ? "🗜️ with compression" : "⚡ raw (already compressed)"}`, "info");
 
   for (let i = 0; i < totalChunks; i++) {
     const start = i * CHUNK_SIZE;
-    const chunk = buffer.slice(start, start + CHUNK_SIZE);
+    const rawChunk = new Uint8Array(buffer, start, Math.min(CHUNK_SIZE, buffer.byteLength - start));
+
+    // ========== COMPRESS if worthwhile ==========
+    const chunk = compress
+      ? fzstd.compress(rawChunk, { level: 3 }).buffer
+      : rawChunk.buffer;
 
     while (dataChannel.bufferedAmount > 1024 * 1024) {
       await new Promise(r => setTimeout(r, 50));
@@ -259,7 +288,7 @@ async function sendFile(file) {
 
     const pct = Math.round(((i + 1) / totalChunks) * 100);
     sendProgressBar.style.width = pct + "%";
-    sendProgressLabel.textContent = `${file.name} — ${pct}% (${formatSize(start + chunk.byteLength)} / ${formatSize(buffer.byteLength)})`;
+    sendProgressLabel.textContent = `${file.name} — ${pct}% (${formatSize(start + rawChunk.byteLength)} / ${formatSize(buffer.byteLength)})`;
   }
 
   dataChannel.send(JSON.stringify({ type: "file-end" }));
@@ -270,6 +299,20 @@ async function sendFile(file) {
     sendProgressBar.style.width = "0%";
     sendProgressLabel.textContent = "";
   }, 2000);
+}
+
+// ========== Gesture Bridge ==========
+// gestureState and gestureSendFiles() are used by gesture.js
+const gestureState = { filesReady: false };
+
+function gestureSendFiles() {
+  const files = fileInput.files;
+  if (files && files.length > 0) {
+    [...files].forEach(sendFile);
+    fileInput.value = "";
+    gestureState.filesReady = false;
+    dropZone.classList.remove("file-ready");
+  }
 }
 
 // ========== Button Events ==========
@@ -290,8 +333,6 @@ disconnectBtn.addEventListener("click", () => {
 });
 
 // ========== Drop Zone ==========
-dropZone.addEventListener("click", () => fileInput.click());
-
 dropZone.addEventListener("dragover", e => {
   e.preventDefault();
   dropZone.classList.add("dragover");
@@ -306,8 +347,11 @@ dropZone.addEventListener("drop", e => {
 });
 
 fileInput.addEventListener("change", () => {
-  [...fileInput.files].forEach(sendFile);
-  fileInput.value = "";
+  if (fileInput.files.length > 0) {
+    gestureState.filesReady = true;
+    dropZone.classList.add("file-ready");
+    write(`${fileInput.files.length} file(s) staged — use gesture or drop to send`, "info");
+  }
 });
 
 // ========== Init ==========
