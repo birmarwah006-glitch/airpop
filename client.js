@@ -1,4 +1,4 @@
- // client.js — AirPop Live (with Zstd compression)
+// client.js — AirPop Live (Streaming Rewrite)
 
 const ICE_SERVERS = {
   iceServers: [
@@ -12,39 +12,71 @@ const ICE_SERVERS = {
   ]
 };
 
-const CHUNK_SIZE = 64 * 1024; // 64KB
-
-// ========== Compression ==========
-const SKIP_COMPRESS_TYPES = ["video/", "image/jpeg", "image/png", "image/webp", "application/zip"];
-
-function shouldCompress(fileType) {
-  return !SKIP_COMPRESS_TYPES.some(t => fileType.startsWith(t));
-}
+// ── Chunk & backpressure tuning ───────────────────────────────
+// 64KB chunks: smaller slices = faster first-byte, smoother progress bar
+const CHUNK_SIZE  = 64 * 1024;
+// Pause sending when the DC buffer exceeds 1 MB
+const BUFFER_HIGH = 1 * 1024 * 1024;
+// Resume once it drains back to 128 KB
+const BUFFER_LOW  = 128 * 1024;
 
 let socket;
-let pc = null;
+let pc          = null;
 let dataChannel = null;
-let peerId = null;
+let peerId      = null;
+
+// Receive state — track bytes so we can show receiver-side progress
 let receiveBuffer = { chunks: [], meta: null, received: 0 };
 
-// ========== UI Elements ==========
-const statusDot = document.getElementById("statusDot");
-const statusText = document.getElementById("statusText");
-const connectBtn = document.getElementById("connectBtn");
-const cancelBtn = document.getElementById("cancelBtn");
-const disconnectBtn = document.getElementById("disconnectBtn");
-const sendCard = document.getElementById("sendCard");
-const receiveCard = document.getElementById("receiveCard");
-const receivedArea = document.getElementById("receivedArea");
-const dropZone = document.getElementById("dropZone");
-const fileInput = document.getElementById("fileInput");
+// ── UI Elements ───────────────────────────────────────────────
+const statusDot        = document.getElementById("statusDot");
+const statusText       = document.getElementById("statusText");
+const connectBtn       = document.getElementById("connectBtn");
+const cancelBtn        = document.getElementById("cancelBtn");
+const disconnectBtn    = document.getElementById("disconnectBtn");
+const sendCard         = document.getElementById("sendCard");
+const receiveCard      = document.getElementById("receiveCard");
+const receivedArea     = document.getElementById("receivedArea");
+const dropZone         = document.getElementById("dropZone");
+const fileInput        = document.getElementById("fileInput");
 const sendProgressWrap = document.getElementById("sendProgressWrap");
-const sendProgressBar = document.getElementById("sendProgressBar");
-const sendProgressLabel = document.getElementById("sendProgressLabel");
-const logEl = document.getElementById("log");
-const peerStatus = document.getElementById("peerStatus");
+const sendProgressBar  = document.getElementById("sendProgressBar");
+const sendProgressLabel= document.getElementById("sendProgressLabel");
+const logEl            = document.getElementById("log");
+const peerStatus       = document.getElementById("peerStatus");
 
-// ========== Logging ==========
+// Receiver progress elements — create them if index.html doesn't have them yet
+let recvProgressWrap  = document.getElementById("recvProgressWrap");
+let recvProgressBar   = document.getElementById("recvProgressBar");
+let recvProgressLabel = document.getElementById("recvProgressLabel");
+
+if (!recvProgressWrap) {
+  recvProgressWrap = document.createElement("div");
+  recvProgressWrap.id = "recvProgressWrap";
+  recvProgressWrap.style.cssText = "display:none; margin-top:8px;";
+
+  recvProgressBar = document.createElement("div");
+  recvProgressBar.id = "recvProgressBar";
+  recvProgressBar.style.cssText =
+    "height:6px; background:#4ade80; width:0%; border-radius:3px; transition:width .1s;";
+
+  recvProgressLabel = document.createElement("div");
+  recvProgressLabel.id = "recvProgressLabel";
+  recvProgressLabel.style.cssText = "font-size:12px; margin-top:4px; color:#aaa;";
+
+  recvProgressWrap.appendChild(recvProgressBar);
+  recvProgressWrap.appendChild(recvProgressLabel);
+
+  // Inject after receiveCard if it exists, else after sendCard
+  const anchor = receiveCard || sendCard;
+  if (anchor && anchor.parentNode) {
+    anchor.parentNode.insertBefore(recvProgressWrap, anchor.nextSibling);
+  } else {
+    document.body.appendChild(recvProgressWrap);
+  }
+}
+
+// ── Logging ───────────────────────────────────────────────────
 function write(msg, type = "") {
   const div = document.createElement("div");
   div.className = "entry " + type;
@@ -53,9 +85,9 @@ function write(msg, type = "") {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-// ========== UI State ==========
+// ── UI State ──────────────────────────────────────────────────
 function setServerStatus(connected) {
-  statusDot.className = "status-dot " + (connected ? "connected" : "disconnected");
+  statusDot.className  = "status-dot " + (connected ? "connected" : "disconnected");
   statusText.textContent = connected ? "Connected to server ✔" : "Disconnected ❌";
 }
 
@@ -81,32 +113,16 @@ function setState(state) {
   }
 }
 
-// ========== Socket ==========
+// ── Socket ────────────────────────────────────────────────────
 function initSocket() {
   socket = io(window.location.origin);
 
-  socket.on("connect", () => {
-    setServerStatus(true);
-    setState("idle");
-    write("Connected to server", "success");
-  });
-
-  socket.on("disconnect", () => {
-    setServerStatus(false);
-    write("Disconnected from server", "error");
-  });
-
+  socket.on("connect",       () => { setServerStatus(true);  setState("idle"); write("Connected to server", "success"); });
+  socket.on("disconnect",    () => { setServerStatus(false); write("Disconnected from server", "error"); });
   socket.on("connect_error", err => write("Connection error: " + err.message, "error"));
 
-  socket.on("waiting", () => {
-    setState("searching");
-    write("Waiting for a peer...", "info");
-  });
-
-  socket.on("search-cancelled", () => {
-    setState("idle");
-    write("Search cancelled", "info");
-  });
+  socket.on("waiting",         () => { setState("searching"); write("Waiting for a peer...", "info"); });
+  socket.on("search-cancelled",() => { setState("idle");      write("Search cancelled", "info"); });
 
   socket.on("matched", ({ roomId, initiator, peerId: pid }) => {
     peerId = pid;
@@ -128,7 +144,7 @@ function initSocket() {
 
   socket.on("ice-candidate", async ({ from, candidate }) => {
     if (pc) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (_) {}
     }
   });
 
@@ -139,7 +155,7 @@ function initSocket() {
   });
 }
 
-// ========== WebRTC ==========
+// ── WebRTC ────────────────────────────────────────────────────
 function setupPeerConnection(initiator) {
   pc = new RTCPeerConnection(ICE_SERVERS);
 
@@ -160,7 +176,6 @@ function setupPeerConnection(initiator) {
   if (initiator) {
     dataChannel = pc.createDataChannel("airpop", { ordered: true });
     setupDataChannel(dataChannel);
-
     pc.createOffer().then(offer => {
       pc.setLocalDescription(offer);
       socket.emit("offer", { to: peerId, offer });
@@ -176,119 +191,148 @@ function setupPeerConnection(initiator) {
 function closePeer() {
   if (pc) { pc.close(); pc = null; }
   dataChannel = null;
-  peerId = null;
+  peerId      = null;
 }
 
-// ========== Data Channel ==========
+// ── Data Channel ──────────────────────────────────────────────
 function setupDataChannel(dc) {
   dc.binaryType = "arraybuffer";
 
-  dc.onopen = () => write("Direct P2P file channel open ✔", "success");
+  dc.onopen  = () => write("Direct P2P file channel open ✔", "success");
   dc.onclose = () => write("File channel closed");
 
   dc.onmessage = ({ data }) => {
     if (typeof data === "string") {
       const msg = JSON.parse(data);
+
       if (msg.type === "file-start") {
         receiveBuffer = { chunks: [], meta: msg, received: 0 };
-        write(`Receiving: ${msg.name} (${formatSize(msg.size)})${msg.compressed ? " 🗜️ compressed" : ""}`, "info");
+        recvProgressWrap.style.display = "block";
+        recvProgressBar.style.width    = "0%";
+        recvProgressLabel.textContent  = `Receiving ${msg.name} (${formatSize(msg.size)})…`;
+        write(`Receiving: ${msg.name} (${formatSize(msg.size)})`, "info");
         receiveCard.classList.remove("hidden");
+
       } else if (msg.type === "file-end") {
         finalizeFile();
       }
+
     } else {
-      // ========== DECOMPRESS if needed ==========
-      const incoming = new Uint8Array(data);
-      const chunk = receiveBuffer.meta?.compressed
-        ? fzstd.decompress(incoming)
-        : incoming;
-      receiveBuffer.chunks.push(chunk);
-      receiveBuffer.received += chunk.byteLength;
+      // Binary chunk — update receiver progress bar in real time
+      receiveBuffer.chunks.push(data);
+      receiveBuffer.received += data.byteLength;
+
+      if (receiveBuffer.meta) {
+        const pct = Math.min(
+          100,
+          Math.round((receiveBuffer.received / receiveBuffer.meta.size) * 100)
+        );
+        recvProgressBar.style.width   = pct + "%";
+        recvProgressLabel.textContent =
+          `${receiveBuffer.meta.name} — ${pct}% `+
+          `(${formatSize(receiveBuffer.received)} / ${formatSize(receiveBuffer.meta.size)})`;
+      }
     }
   };
 }
 
 function finalizeFile() {
   const { chunks, meta } = receiveBuffer;
-
-  // chunks are Uint8Array — map just in case
-  const blob = new Blob(
-    chunks.map(c => c instanceof Uint8Array ? c : new Uint8Array(c)),
-    { type: meta.fileType }
-  );
-
-  const url = URL.createObjectURL(blob);
+  const blob = new Blob(chunks, { type: meta.fileType });
+  const url  = URL.createObjectURL(blob);
 
   if (meta.fileType.startsWith("image/")) {
-    const img = document.createElement("img");
-    img.src = url;
-    img.title = meta.name;
+    const img   = document.createElement("img");
+    img.src     = url;
+    img.title   = meta.name;
     receivedArea.appendChild(img);
   } else if (meta.fileType.startsWith("video/")) {
-    const video = document.createElement("video");
-    video.src = url;
-    video.controls = true;
+    const video   = document.createElement("video");
+    video.src     = url;
+    video.controls= true;
     receivedArea.appendChild(video);
   } else {
     const item = document.createElement("div");
     item.className = "file-item";
-    item.innerHTML = `📄 <a href="${url}" download="${meta.name}">${meta.name}</a> (${formatSize(meta.size)})`;
+    item.innerHTML =
+      `📄 <a href="${url}" download="${meta.name}">${meta.name}</a> (${formatSize(meta.size)})`;
     receivedArea.appendChild(item);
   }
 
   write(`Received: ${meta.name} ✔`, "success");
+
+  // Hide receiver progress after a moment
+  setTimeout(() => {
+    recvProgressWrap.style.display = "none";
+    recvProgressBar.style.width    = "0%";
+    recvProgressLabel.textContent  = "";
+  }, 2000);
+
   receiveBuffer = { chunks: [], meta: null, received: 0 };
 }
 
-// ========== Send File ==========
+// ── Helpers ───────────────────────────────────────────────────
 function formatSize(bytes) {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  if (bytes < 1024)           return bytes + " B";
+  if (bytes < 1024 * 1024)    return (bytes / 1024).toFixed(1) + " KB";
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+// Event-driven drain: resolves when bufferedAmount drops below BUFFER_LOW
+function waitForDrain(dc) {
+  return new Promise(resolve => {
+    dc.bufferedAmountLowThreshold = BUFFER_LOW;
+    dc.onbufferedamountlow = () => {
+      dc.onbufferedamountlow = null;
+      resolve();
+    };
+  });
+}
+
+// ── Send File (streaming — no full file read upfront) ─────────
 async function sendFile(file) {
   if (!dataChannel || dataChannel.readyState !== "open") {
     write("No peer connected yet.", "error");
     return;
   }
 
-  const buffer = await file.arrayBuffer();
-  const totalChunks = Math.ceil(buffer.byteLength / CHUNK_SIZE);
-  const fileType = file.type || "application/octet-stream";
-  const compress = shouldCompress(fileType);
+  const fileType    = file.type || "application/octet-stream";
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
   sendProgressWrap.style.display = "block";
+  sendProgressBar.style.width    = "0%";
+  sendProgressLabel.textContent  = `${file.name} — preparing…`;
 
-  // ========== Send metadata (with compression flag) ==========
+  // ✅ Tell receiver what's coming
   dataChannel.send(JSON.stringify({
     type: "file-start",
     name: file.name,
-    size: buffer.byteLength,
+    size: file.size,
     fileType,
-    compressed: compress
   }));
 
-  write(`Sending: ${file.name} ${compress ? "🗜️ with compression" : "⚡ raw (already compressed)"}`, "info");
+  write(`Sending: ${file.name} (${formatSize(file.size)})`, "info");
 
+  // ✅ Stream chunk by chunk using File.slice() — never loads full file into RAM
   for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const rawChunk = new Uint8Array(buffer, start, Math.min(CHUNK_SIZE, buffer.byteLength - start));
+    const start  = i * CHUNK_SIZE;
+    const end    = Math.min(start + CHUNK_SIZE, file.size);
 
-    // ========== COMPRESS if worthwhile ==========
-    const chunk = compress
-      ? fzstd.compress(rawChunk, { level: 3 }).buffer
-      : rawChunk.buffer;
+    // file.slice() is lazy — only this chunk is read from disk right now
+    const chunk  = await file.slice(start, end).arrayBuffer();
 
-    while (dataChannel.bufferedAmount > 1024 * 1024) {
-      await new Promise(r => setTimeout(r, 50));
+    // Backpressure: wait if the send buffer is too full
+    if (dataChannel.bufferedAmount > BUFFER_HIGH) {
+      await waitForDrain(dataChannel);
     }
 
     dataChannel.send(chunk);
 
+    // Update progress bar immediately after each chunk
     const pct = Math.round(((i + 1) / totalChunks) * 100);
-    sendProgressBar.style.width = pct + "%";
-    sendProgressLabel.textContent = `${file.name} — ${pct}% (${formatSize(start + rawChunk.byteLength)} / ${formatSize(buffer.byteLength)})`;
+    sendProgressBar.style.width    = pct + "%";
+    sendProgressLabel.textContent  =
+      `${file.name} — ${pct}% (${formatSize(end)} / ${formatSize(file.size)})`;
   }
 
   dataChannel.send(JSON.stringify({ type: "file-end" }));
@@ -296,35 +340,32 @@ async function sendFile(file) {
 
   setTimeout(() => {
     sendProgressWrap.style.display = "none";
-    sendProgressBar.style.width = "0%";
-    sendProgressLabel.textContent = "";
+    sendProgressBar.style.width    = "0%";
+    sendProgressLabel.textContent  = "";
   }, 2000);
 }
 
-// ========== Gesture Bridge ==========
-// gestureState and gestureSendFiles() are used by gesture.js
+// ── Gesture Bridge ────────────────────────────────────────────
 const gestureState = { filesReady: false };
 
 function gestureSendFiles() {
   const files = fileInput.files;
   if (files && files.length > 0) {
     [...files].forEach(sendFile);
-    fileInput.value = "";
-    gestureState.filesReady = false;
+    fileInput.value           = "";
+    gestureState.filesReady   = false;
     dropZone.classList.remove("file-ready");
   }
 }
 
-// ========== Button Events ==========
+// ── Button Events ─────────────────────────────────────────────
 connectBtn.addEventListener("click", () => {
   socket.emit("find-peer");
   setState("searching");
   write("Searching for a peer...", "info");
 });
 
-cancelBtn.addEventListener("click", () => {
-  socket.emit("cancel-search");
-});
+cancelBtn.addEventListener("click", () => socket.emit("cancel-search"));
 
 disconnectBtn.addEventListener("click", () => {
   closePeer();
@@ -332,15 +373,10 @@ disconnectBtn.addEventListener("click", () => {
   write("Disconnected from peer", "info");
 });
 
-// ========== Drop Zone ==========
-dropZone.addEventListener("dragover", e => {
-  e.preventDefault();
-  dropZone.classList.add("dragover");
-});
-
-dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
-
-dropZone.addEventListener("drop", e => {
+// ── Drop Zone ─────────────────────────────────────────────────
+dropZone.addEventListener("dragover",  e  => { e.preventDefault(); dropZone.classList.add("dragover"); });
+dropZone.addEventListener("dragleave", ()  => dropZone.classList.remove("dragover"));
+dropZone.addEventListener("drop",      e  => {
   e.preventDefault();
   dropZone.classList.remove("dragover");
   [...e.dataTransfer.files].forEach(sendFile);
@@ -354,5 +390,5 @@ fileInput.addEventListener("change", () => {
   }
 });
 
-// ========== Init ==========
+// ── Init ──────────────────────────────────────────────────────
 initSocket();
