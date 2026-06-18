@@ -1,202 +1,434 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AirPop Live</title>
-  <script src="https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/fzstd.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Airpop — Gesture File Transfer</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #0f0f1a;
-      color: #e0e0e0;
-      text-align: center;
-      padding: 40px 20px;
-      min-height: 100vh;
-    }
+:root {
+  --bg: #f7f6f3;
+  --surface: #ffffff;
+  --border: #e8e6e0;
+  --text: #1a1916;
+  --text-2: #6b6860;
+  --text-3: #a8a69f;
+  --accent: #2d6a4f;
+  --accent-light: #e8f5ee;
+  --accent-2: #e07a3a;
+  --accent-2-light: #fdf0e6;
+  --red: #c0392b;
+  --red-light: #fdecea;
+  --radius: 16px;
+  --shadow: 0 2px 16px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04);
+  --shadow-lg: 0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
+}
 
-    h1 { font-size: 2rem; font-weight: 700; color: #78dcff; letter-spacing: 2px; margin-bottom: 4px; }
-    h1 span { color: #fff; }
-    .sub { font-size: 12px; color: rgba(255,255,255,0.28); letter-spacing: 1px; margin-bottom: 22px; }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 0;
+  overflow-x: hidden;
+}
 
-    #serverStatus {
-      display: inline-flex; align-items: center; gap: 7px;
-      font-size: 12px; color: rgba(255,255,255,0.32); margin-bottom: 18px;
-    }
-    #statusDot { width: 8px; height: 8px; border-radius: 50%; background: #444; transition: background .3s; }
+nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
 
-    .controls { margin-bottom: 14px; }
+.nav-logo {
+  font-family: 'Lora', serif;
+  font-size: 1.25rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  background: linear-gradient(90deg, #ff3b3b, #ff9900, #ffdd00, #33cc33, #0099ff, #9933cc, #ff3b3b);
+  background-size: 200% auto;
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: rainbow 4s linear infinite;
+}
 
-    button {
-      padding: 9px 20px; margin: 4px;
-      background: rgba(120,220,255,0.08); color: #78dcff;
-      border: 1px solid rgba(120,220,255,0.32); border-radius: 8px;
-      cursor: pointer; font-weight: 600; font-size: 13px;
-      transition: background .15s, border-color .15s;
-    }
-    button:hover { background: rgba(120,220,255,0.16); border-color: rgba(120,220,255,0.6); }
+@keyframes rainbow {
+  to { background-position: 200% center; }
+}
 
-    .hidden { display: none !important; }
+.nav-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+  background: var(--bg);
+  padding: 6px 14px;
+  border-radius: 100px;
+  border: 1px solid var(--border);
+}
 
-    #peerStatus { min-height: 20px; font-size: 13px; color: rgba(255,255,255,0.42); margin-bottom: 14px; }
+#statusDot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #ccc;
+  transition: background 0.3s;
+}
 
-    #sendCard { max-width: 440px; margin: 0 auto 20px; }
+.hero {
+  text-align: center;
+  padding: 64px 24px 40px;
+  max-width: 560px;
+  margin: 0 auto;
+}
 
-    #dropZone {
-      border: 2px dashed rgba(120,220,255,0.25); padding: 28px 20px;
-      border-radius: 12px; cursor: pointer; font-size: 14px;
-      color: rgba(255,255,255,0.38); line-height: 1.6;
-      transition: background .2s, border-color .2s, box-shadow .2s;
-    }
-    #dropZone:hover, #dropZone.dragover { background: rgba(120,220,255,0.05); border-color: rgba(120,220,255,0.55); }
-    #dropZone.gesture-hover { border-color: #78dcff; background: rgba(120,220,255,0.07); box-shadow: 0 0 18px rgba(120,220,255,0.18); }
-    #dropZone.file-ready    { border-color: #4ade80; background: rgba(74,222,128,0.05);  box-shadow: 0 0 18px rgba(74,222,128,0.14); }
+.hero-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-light);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 14px;
+  border-radius: 100px;
+  margin-bottom: 20px;
+  letter-spacing: 0.02em;
+}
 
-    #dzIcon { font-size: 2rem; margin-bottom: 8px; }
-    #gestureHint { margin-top: 10px; font-size: 11px; color: rgba(120,220,255,0.32); line-height: 1.9; }
+.hero h1 {
+  font-family: 'Lora', serif;
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  margin-bottom: 16px;
+}
 
-    #fileReadyBanner { margin-top: 8px; font-size: 13px; color: #4ade80; min-height: 18px; }
+.hero h1 em { font-style: italic; color: var(--accent); }
 
-    #sendBtn {
-      margin-top: 12px;
-      width: 100%;
-      padding: 11px;
-      background: rgba(74,222,128,0.12);
-      color: #4ade80;
-      border: 1px solid rgba(74,222,128,0.4);
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: background .15s;
-    }
-    #sendBtn:hover { background: rgba(74,222,128,0.22); }
+.hero p {
+  font-size: 16px;
+  color: var(--text-2);
+  line-height: 1.7;
+  font-weight: 300;
+  max-width: 420px;
+  margin: 0 auto;
+}
 
-    #progressWrap { height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; margin-top: 12px; }
-    #progressBar  { height: 100%; width: 0; background: linear-gradient(90deg,#78dcff,#4ade80); border-radius: 4px; transition: width .1s; }
-    #progressLbl  { margin-top: 4px; font-size: 11px; color: rgba(255,255,255,0.28); text-align: right; }
+.steps {
+  display: flex;
+  gap: 12px;
+  max-width: 560px;
+  margin: 40px auto 0;
+  padding: 0 24px;
+}
 
-    #receiveCard { max-width: 440px; margin: 0 auto 20px; text-align: left; }
-    #receiveCard h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: rgba(255,255,255,0.3); margin-bottom: 8px; }
-    #receivedArea img, #receivedArea video { max-width: 100%; border-radius: 8px; margin-top: 8px; display: block; }
-    .file-item { padding: 8px 12px; background: rgba(255,255,255,0.04); border-radius: 8px; margin-top: 6px; font-size: 13px; }
-    .file-item a { color: #78dcff; }
+.step {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 16px;
+  text-align: center;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
 
-    #log {
-      max-width: 440px; margin: 0 auto;
-      background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.05);
-      border-radius: 8px; padding: 10px 12px; font-size: 11px;
-      max-height: 150px; overflow-y: auto; text-align: left;
-      color: rgba(255,255,255,0.26); line-height: 1.7;
-    }
-    #log .success { color: #4ade80; }
-    #log .error   { color: #ff4d6d; }
-    #log .info    { color: #78dcff; }
-  </style>
-  <script type="text/javascript">
+.step:hover { box-shadow: var(--shadow); transform: translateY(-2px); }
+.step-icon { font-size: 1.6rem; margin-bottom: 8px; }
+.step-title { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+.step-desc { font-size: 11px; color: var(--text-3); line-height: 1.5; }
+
+.main {
+  max-width: 520px;
+  margin: 40px auto;
+  padding: 0 24px 80px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.card-header {
+  padding: 20px 24px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+#peerStatus {
+  font-size: 12px;
+  color: var(--text-3);
+  padding: 20px 24px 0;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controls {
+  padding: 16px 24px;
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn:hover { background: var(--bg); }
+.btn-primary { background: var(--text); color: #fff; border-color: var(--text); }
+.btn-primary:hover { background: #333; border-color: #333; }
+.btn-danger { background: var(--red-light); color: var(--red); border-color: #f5c6c2; }
+.btn-danger:hover { background: #fad7d4; }
+.hidden { display: none !important; }
+
+#sendCard { padding: 0 24px 24px; }
+
+#dropZone {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 40px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--bg);
+}
+
+#dropZone:hover, #dropZone.dragover { border-color: var(--accent); background: var(--accent-light); }
+#dropZone.gesture-hover { border-color: var(--accent-2); background: var(--accent-2-light); box-shadow: 0 0 0 4px rgba(224,122,58,0.1); }
+#dropZone.file-ready { border-color: var(--accent); background: var(--accent-light); box-shadow: 0 0 0 4px rgba(45,106,79,0.1); }
+
+#dzIcon { font-size: 2.4rem; margin-bottom: 12px; }
+#dzText { font-size: 14px; color: var(--text-2); font-weight: 400; margin-bottom: 6px; }
+#gestureHint { font-size: 12px; color: var(--text-3); line-height: 2; }
+
+#fileReadyBanner {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 500;
+  min-height: 18px;
+}
+
+.btn-send {
+  margin-top: 12px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  display: none;
+}
+
+.btn-send:hover { background: #245c43; }
+
+#progressWrap {
+  height: 4px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 12px;
+  display: none;
+}
+
+#progressBar {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--accent), #52b788);
+  border-radius: 4px;
+  transition: width 0.1s;
+}
+
+#progressLbl {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: right;
+}
+
+#receiveCard { padding: 0 24px 24px; display: none; }
+#receiveCard h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); margin-bottom: 10px; }
+
+#receivedArea img, #receivedArea video {
+  max-width: 100%;
+  border-radius: 8px;
+  margin-top: 8px;
+  display: block;
+  box-shadow: var(--shadow);
+}
+
+.file-item {
+  padding: 10px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 6px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-item a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.file-item a:hover { text-decoration: underline; }
+
+#log {
+  margin: 0 24px 24px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-family: 'DM Mono', monospace;
+  max-height: 120px;
+  overflow-y: auto;
+  color: var(--text-3);
+  line-height: 1.8;
+}
+
+#log .success { color: var(--accent); }
+#log .error   { color: var(--red); }
+#log .info    { color: #2d6a8a; }
+
+.divider { height: 1px; background: var(--border); margin: 0 24px; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.hero  { animation: fadeUp 0.5s ease both; }
+.steps { animation: fadeUp 0.5s 0.1s ease both; }
+.main  { animation: fadeUp 0.5s 0.2s ease both; }
+</style>
+<script type="text/javascript">
     (function(c,l,a,r,i,t,y){
         c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
         t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
         y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
     })(window, document, "clarity", "script", "vviycg7kho");
-  </script>
+</script>
 </head>
 <body>
 
-<h1>Air<span>Pop</span> Live</h1>
-<p class="sub">Instant P2P File Transfer</p>
+<nav>
+  <div class="nav-logo">Airpop</div>
+  <div class="nav-status">
+    <span id="statusDot"></span>
+    <span id="statusText">Connecting...</span>
+  </div>
+</nav>
 
-<!-- HOW IT WORKS -->
-<div style="max-width:440px;margin:0 auto 28px;background:rgba(120,220,255,0.06);border:1px solid rgba(120,220,255,0.18);border-radius:12px;padding:20px 24px;text-align:left;">
-  <p style="font-size:12px;color:rgba(120,220,255,0.6);letter-spacing:1px;margin-bottom:14px;text-transform:uppercase;">How it works</p>
-  <div style="display:flex;flex-direction:column;gap:12px;">
-    <div style="display:flex;align-items:center;gap:14px;">
-      <span style="font-size:1.6rem;">📱</span>
-      <div>
-        <p style="font-size:14px;color:#fff;font-weight:600;">Step 1 — Open on two devices</p>
-        <p style="font-size:12px;color:rgba(255,255,255,0.4);">Open airpop.onrender.com on both devices</p>
-      </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:14px;">
-      <span style="font-size:1.6rem;">🔗</span>
-      <div>
-        <p style="font-size:14px;color:#fff;font-weight:600;">Step 2 — Click Connect on both</p>
-        <p style="font-size:12px;color:rgba(255,255,255,0.4);">Both devices pair automatically</p>
-      </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:14px;">
-      <span style="font-size:1.6rem;">✊</span>
-      <div>
-        <p style="font-size:14px;color:#fff;font-weight:600;">Step 3 — Grab to pick, open palm to send</p>
-        <p style="font-size:12px;color:rgba(255,255,255,0.4);">Close fist = grab file. Open palm = send it.</p>
-      </div>
-    </div>
+<div class="hero">
+  <div class="hero-tag">✦ Gesture-powered file transfer</div>
+  <h1>Hand it over,<br><em>literally.</em></h1>
+  <p>Close your fist to grab. Open your palm to send. Any device to any device. No app, no cables, no pairing.</p>
+</div>
+
+<div class="steps">
+  <div class="step">
+    <div class="step-icon">📱</div>
+    <div class="step-title">Open on 2 devices</div>
+    <div class="step-desc">Both open airpop.onrender.com</div>
+  </div>
+  <div class="step">
+    <div class="step-icon">🔗</div>
+    <div class="step-title">Connect</div>
+    <div class="step-desc">Tap Connect on both devices</div>
+  </div>
+  <div class="step">
+    <div class="step-icon">✊</div>
+    <div class="step-title">Grab & release</div>
+    <div class="step-desc">Fist to grab, open palm to send</div>
   </div>
 </div>
 
-<div id="serverStatus">
-  <span id="statusDot"></span>
-  <span id="statusText">Connecting...</span>
-</div>
-
-<div class="controls">
-  <button id="connectBtn">Connect</button>
-  <button id="cancelBtn"     class="hidden">Cancel</button>
-  <button id="disconnectBtn" class="hidden">Disconnect</button>
-</div>
-
-<div id="peerStatus"></div>
-
-<div id="sendCard" class="hidden">
-  <div id="dropZone">
-    <div id="dzIcon">📁</div>
-    <div id="dzText">Drop files here or click to select</div>
-    <div id="gestureHint">
-      👆 Double-push to pick &nbsp;·&nbsp; ✊ Fist to grab &nbsp;·&nbsp; 🖐 Open to send
+<div class="main">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Transfer</div>
     </div>
+
+    <div id="peerStatus"></div>
+
+    <div class="controls">
+      <button id="connectBtn" class="btn btn-primary">Connect</button>
+      <button id="cancelBtn" class="btn hidden">Cancel</button>
+      <button id="disconnectBtn" class="btn btn-danger hidden">Disconnect</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div id="sendCard" class="hidden">
+      <div id="dropZone">
+        <div id="dzIcon">📁</div>
+        <div id="dzText">Drop files here or click to select</div>
+        <div id="gestureHint">✊ Fist to grab &nbsp;·&nbsp; 🖐 Open palm on other device to receive</div>
+      </div>
+      <input type="file" id="fileInput" multiple hidden>
+      <button id="ghostPickerBtn" style="position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;padding:0;margin:0;border:none;z-index:99999;overflow:hidden;" tabindex="-1">
+        <input type="file" id="ghostFileInput" multiple style="position:absolute;width:60px;height:60px;opacity:0;cursor:pointer;top:0;left:0;">
+      </button>
+      <div id="fileReadyBanner"></div>
+      <button id="sendBtn" class="btn-send">🚀 Send Files</button>
+      <div id="progressWrap"><div id="progressBar"></div></div>
+      <div id="progressLbl"></div>
+    </div>
+
+    <div id="receiveCard">
+      <h3>Received Files</h3>
+      <div id="receivedArea"></div>
+    </div>
+
+    <div id="log"></div>
   </div>
-  <input type="file" id="fileInput" multiple hidden>
-
-  <button id="ghostPickerBtn" style="
-    position:fixed;
-    width:1px; height:1px;
-    opacity:0;
-    pointer-events:none;
-    padding:0; margin:0; border:none;
-    z-index:99999;
-    overflow:hidden;
-  " tabindex="-1">
-    <input type="file" id="ghostFileInput" multiple style="
-      position:absolute;
-      width:60px; height:60px;
-      opacity:0;
-      cursor:pointer;
-      top:0; left:0;
-    ">
-  </button>
-
-  <div id="fileReadyBanner"></div>
-  <button id="sendBtn" class="hidden">🚀 Send Selected Files</button>
-  <div id="progressWrap" style="display:none;"><div id="progressBar"></div></div>
-  <div id="progressLbl"></div>
 </div>
-
-<div id="receiveCard" class="hidden">
-  <h3>Received Files</h3>
-  <div id="receivedArea"></div>
-</div>
-
-<div id="log"></div>
 
 <script src="/socket.io/socket.io.js"></script>
-<script src="/mediapipe/hands.js"></script>
-<script src="/mediapipe/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 
-<!-- ================================================================
-     CLIENT
-     ================================================================ -->
+<!-- CLIENT -->
 <script>
 var ICE_SERVERS = {
   iceServers: [
@@ -205,16 +437,15 @@ var ICE_SERVERS = {
     { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" }
   ]
 };
-var CHUNK_SIZE = 65536;
 
-// ========== Compression ==========
-var SKIP_COMPRESS_TYPES = ["video/", "image/jpeg", "image/png", "image/webp", "application/zip"];
-function shouldCompress(fileType) {
-  return !SKIP_COMPRESS_TYPES.some(function(t){ return fileType.startsWith(t); });
-}
+// ── Chunk size: 64KB slices read lazily from disk ──
+var CHUNK_SIZE = 65536;
+// ── Backpressure: pause at 1MB buffered, resume at 128KB ──
+var BUFFER_HIGH = 1 * 1024 * 1024;
+var BUFFER_LOW  = 128 * 1024;
 
 var socket, pc = null, dc = null, peerId = null;
-var rxBuf = { chunks: [], meta: null };
+var rxBuf = { chunks: [], meta: null, received: 0 };
 
 var statusDot      = document.getElementById("statusDot");
 var statusText     = document.getElementById("statusText");
@@ -226,7 +457,6 @@ var receiveCard    = document.getElementById("receiveCard");
 var receivedArea   = document.getElementById("receivedArea");
 var dropZone       = document.getElementById("dropZone");
 var fileInput      = document.getElementById("fileInput");
-var ghostBtn       = document.getElementById("ghostPickerBtn");
 var ghostInput     = document.getElementById("ghostFileInput");
 var fileReadyBanner= document.getElementById("fileReadyBanner");
 var sendBtn        = document.getElementById("sendBtn");
@@ -241,15 +471,15 @@ var stagedFiles = [];
 
 function write(msg, type) {
   var d = document.createElement("div");
-  d.className   = type || "";
+  d.className = type || "";
   d.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
   logEl.appendChild(d);
   logEl.scrollTop = logEl.scrollHeight;
 }
 
 function setServer(ok) {
-  statusDot.style.background = ok ? "#4ade80" : "#ff4d6d";
-  statusText.textContent     = ok ? "Server connected ✔" : "Disconnected ❌";
+  statusDot.style.background = ok ? "#2d6a4f" : "#c0392b";
+  statusText.textContent = ok ? "Connected" : "Disconnected";
 }
 
 function setState(s) {
@@ -262,11 +492,11 @@ function setState(s) {
     connectBtn.classList.remove("hidden");
   } else if (s === "searching") {
     cancelBtn.classList.remove("hidden");
-    peerStatus.textContent = "🔍 Searching for a peer...";
+    peerStatus.innerHTML = "<span>🔍</span> Searching for a peer...";
   } else if (s === "connected") {
     disconnectBtn.classList.remove("hidden");
     sendCard.classList.remove("hidden");
-    peerStatus.textContent = "✅ Peer connected — send files below!";
+    peerStatus.innerHTML = "<span>✅</span> Peer connected — select a file to send";
   }
 }
 
@@ -274,8 +504,8 @@ function stageFiles(files) {
   stagedFiles = Array.from(files);
   gestureState.filesReady = true;
   dropZone.classList.add("file-ready");
-  fileReadyBanner.textContent = "✅ " + stagedFiles.length + " file(s) ready";
-  sendBtn.classList.remove("hidden");
+  fileReadyBanner.textContent = "✅ " + stagedFiles.length + " file(s) ready to send";
+  sendBtn.style.display = "block";
   write(stagedFiles.length + " file(s) staged", "info");
 }
 
@@ -284,7 +514,7 @@ function clearStaged() {
   gestureState.filesReady = false;
   dropZone.classList.remove("file-ready");
   fileReadyBanner.textContent = "";
-  sendBtn.classList.add("hidden");
+  sendBtn.style.display = "none";
   fileInput.value = "";
 }
 
@@ -298,9 +528,9 @@ function gestureSendFiles() { sendStagedFiles(); }
 
 function initSocket() {
   socket = io(window.location.origin);
-  socket.on("connect",          function() { setServer(true);  setState("idle"); write("Connected to server", "success"); });
+  socket.on("connect",          function() { setServer(true); setState("idle"); write("Connected to server", "success"); });
   socket.on("disconnect",       function() { setServer(false); write("Disconnected", "error"); });
-  socket.on("connect_error",    function(e){ write("Socket error: " + e.message, "error"); });
+  socket.on("connect_error",    function(e) { write("Socket error: " + e.message, "error"); });
   socket.on("waiting",          function() { setState("searching"); write("Waiting for peer...", "info"); });
   socket.on("search-cancelled", function() { setState("idle"); write("Search cancelled", "info"); });
   socket.on("matched", function(d) {
@@ -326,7 +556,7 @@ function initSocket() {
   });
   socket.on("peer-grabbed", function() {
     write("📦 Sender grabbed a file — open your palm to receive", "info");
-    peerStatus.textContent = "📦 Sender grabbed a file — open your palm to receive it";
+    peerStatus.innerHTML = "<span>📦</span> Sender grabbed a file — open your palm to receive it";
     window._airpopResetReceiver && window._airpopResetReceiver();
   });
   socket.on("peer-ready", function() {
@@ -342,7 +572,7 @@ function setupPeer(initiator) {
   };
   pc.onconnectionstatechange = function() {
     write("P2P: " + pc.connectionState, pc.connectionState === "connected" ? "success" : "");
-    if (pc.connectionState === "connected")  setState("connected");
+    if (pc.connectionState === "connected") setState("connected");
     if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
       write("P2P lost", "error"); closePeer(); setState("idle");
     }
@@ -372,19 +602,15 @@ function setupDC(chan) {
     if (typeof e.data === "string") {
       var msg = JSON.parse(e.data);
       if (msg.type === "file-start") {
-        rxBuf = { chunks: [], meta: msg };
-        write("Receiving: " + msg.name + " (" + fmtSize(msg.size) + ")" + (msg.compressed ? " 🗜️" : ""), "info");
-        receiveCard.classList.remove("hidden");
+        rxBuf = { chunks: [], meta: msg, received: 0 };
+        write("Receiving: " + msg.name + " (" + fmtSize(msg.size) + ")", "info");
+        receiveCard.style.display = "block";
       } else if (msg.type === "file-end") {
         finalizeFile();
       }
     } else {
-      // ========== DECOMPRESS if needed, otherwise keep raw ArrayBuffer ==========
-      if (rxBuf.meta && rxBuf.meta.compressed) {
-        rxBuf.chunks.push(fzstd.decompress(new Uint8Array(e.data)));
-      } else {
-        rxBuf.chunks.push(e.data); // raw ArrayBuffer — exactly like original
-      }
+      rxBuf.chunks.push(e.data);
+      rxBuf.received += e.data.byteLength;
     }
   };
 }
@@ -392,7 +618,7 @@ function setupDC(chan) {
 function finalizeFile() {
   var meta = rxBuf.meta;
   var blob = new Blob(rxBuf.chunks, { type: meta.fileType });
-  var url = URL.createObjectURL(blob);
+  var url  = URL.createObjectURL(blob);
   if (meta.fileType.startsWith("image/")) {
     var img = document.createElement("img"); img.src = url; img.title = meta.name;
     receivedArea.appendChild(img);
@@ -401,58 +627,54 @@ function finalizeFile() {
     receivedArea.appendChild(v);
   } else {
     var d = document.createElement("div"); d.className = "file-item";
-    d.innerHTML = "📄 <a href='" + url + "' download='" + meta.name + "'>" + meta.name + "</a> (" + fmtSize(meta.size) + ")";
+    d.innerHTML = "📄 <a href='" + url + "' download='" + meta.name + "'>" + meta.name + "</a> <span style='color:var(--text-3);margin-left:auto;font-size:11px;'>" + fmtSize(meta.size) + "</span>";
     receivedArea.appendChild(d);
   }
   write("Received: " + meta.name + " ✔", "success");
-  rxBuf = { chunks: [], meta: null };
+  rxBuf = { chunks: [], meta: null, received: 0 };
 }
 
 function fmtSize(b) {
-  if (b < 1024)    return b + " B";
+  if (b < 1024) return b + " B";
   if (b < 1048576) return (b/1024).toFixed(1) + " KB";
   return (b/1048576).toFixed(1) + " MB";
 }
 
+// ── Event-driven backpressure drain ──
+function waitForDrain(chan) {
+  return new Promise(function(resolve) {
+    chan.bufferedAmountLowThreshold = BUFFER_LOW;
+    chan.onbufferedamountlow = function() {
+      chan.onbufferedamountlow = null;
+      resolve();
+    };
+  });
+}
+
+// ── FIXED: streams file chunk by chunk — never loads full file into RAM ──
 async function sendFile(file) {
   if (!dc || dc.readyState !== "open") { write("Data channel not open.", "error"); return; }
-
-  var buf      = await file.arrayBuffer();
-  var total    = Math.ceil(buf.byteLength / CHUNK_SIZE);
-  var fileType = file.type || "application/octet-stream";
-  var compress = shouldCompress(fileType);
-
-  write("Sending: " + file.name + " (" + fmtSize(buf.byteLength) + ")" + (compress ? " 🗜️ compressing" : " ⚡ raw"), "info");
-
+  var total = Math.ceil(file.size / CHUNK_SIZE);
   progressWrap.style.display = "block";
-
-  // ========== Send metadata with compression flag ==========
-  dc.send(JSON.stringify({
-    type: "file-start",
-    name: file.name,
-    size: buf.byteLength,
-    fileType: fileType,
-    compressed: compress
-  }));
-
+  progressBar.style.width = "0%";
+  progressLbl.textContent = file.name + " — 0%";
+  write("Sending: " + file.name + " (" + fmtSize(file.size) + ")", "info");
+  dc.send(JSON.stringify({ type:"file-start", name:file.name, size:file.size, fileType:file.type||"application/octet-stream" }));
   for (var i = 0; i < total; i++) {
-    var start    = i * CHUNK_SIZE;
-    var rawChunk = new Uint8Array(buf, start, Math.min(CHUNK_SIZE, buf.byteLength - start));
-
-    // ========== COMPRESS if worthwhile ==========
-    var chunk = compress
-      ? fzstd.compress(rawChunk, { level: 3 }).buffer
-      : rawChunk.buffer;
-
-    while (dc.bufferedAmount > 1048576) { await new Promise(function(r){ setTimeout(r,50); }); }
+    var start = i * CHUNK_SIZE;
+    var end   = Math.min(start + CHUNK_SIZE, file.size);
+    // file.slice() reads only this chunk — no full file load
+    var chunk = await file.slice(start, end).arrayBuffer();
+    // event-driven backpressure — no busy-wait polling
+    if (dc.bufferedAmount > BUFFER_HIGH) {
+      await waitForDrain(dc);
+    }
     dc.send(chunk);
-
     var pct = Math.round(((i+1)/total)*100);
     progressBar.style.width = pct + "%";
-    progressLbl.textContent = file.name + " — " + pct + "%";
+    progressLbl.textContent = file.name + " — " + pct + "% (" + fmtSize(end) + " / " + fmtSize(file.size) + ")";
   }
-
-  dc.send(JSON.stringify({ type: "file-end" }));
+  dc.send(JSON.stringify({ type:"file-end" }));
   write("Sent: " + file.name + " ✔", "success");
   setTimeout(function() {
     progressWrap.style.display = "none";
@@ -461,34 +683,27 @@ async function sendFile(file) {
   }, 2000);
 }
 
-connectBtn.addEventListener("click",    function(){ socket.emit("find-peer"); setState("searching"); write("Searching...", "info"); });
-cancelBtn.addEventListener("click",     function(){ socket.emit("cancel-search"); });
-disconnectBtn.addEventListener("click", function(){ closePeer(); setState("idle"); write("Disconnected", "info"); });
-sendBtn.addEventListener("click",       function(){ sendStagedFiles(); });
+connectBtn.addEventListener("click",    function() { socket.emit("find-peer"); setState("searching"); write("Searching...", "info"); });
+cancelBtn.addEventListener("click",     function() { socket.emit("cancel-search"); });
+disconnectBtn.addEventListener("click", function() { closePeer(); setState("idle"); write("Disconnected", "info"); });
+sendBtn.addEventListener("click",       function() { sendStagedFiles(); });
 
-dropZone.addEventListener("click",     function(){ fileInput.click(); });
-dropZone.addEventListener("dragover",  function(e){ e.preventDefault(); dropZone.classList.add("dragover"); });
-dropZone.addEventListener("dragleave", function(){  dropZone.classList.remove("dragover"); });
+dropZone.addEventListener("click",     function() { fileInput.click(); });
+dropZone.addEventListener("dragover",  function(e) { e.preventDefault(); dropZone.classList.add("dragover"); });
+dropZone.addEventListener("dragleave", function()  { dropZone.classList.remove("dragover"); });
 dropZone.addEventListener("drop", function(e) {
   e.preventDefault();
   dropZone.classList.remove("dragover");
   if (e.dataTransfer.files.length) stageFiles(e.dataTransfer.files);
 });
 
-fileInput.addEventListener("change", function() {
-  if (fileInput.files.length > 0) stageFiles(fileInput.files);
-});
-
-ghostInput.addEventListener("change", function() {
-  if (ghostInput.files.length > 0) stageFiles(ghostInput.files);
-});
+fileInput.addEventListener("change",  function() { if (fileInput.files.length > 0) stageFiles(fileInput.files); });
+ghostInput.addEventListener("change", function() { if (ghostInput.files.length > 0) stageFiles(ghostInput.files); });
 
 initSocket();
 </script>
 
-<!-- ================================================================
-     GESTURE
-     ================================================================ -->
+<!-- GESTURE -->
 <script>
 (function() {
 
@@ -503,19 +718,16 @@ var CFG = {
   doublePushMs:    800
 };
 
-var running    = false;
+var running = false;
 var gx = 0, gy = 0;
-var grabCount  = 0, sendCount  = 0;
+var grabCount = 0, sendCount = 0;
 var isGrabbing = false, hasSent = false;
 var lastWristZ = null, pushCooldown = 0;
 var firstPushAt = null, pushCount = 0, pushTimer = null;
 
-window._airpopResetReceiver = function() {
-  hasSent = false;
-  sendCount = 0;
-};
+window._airpopResetReceiver = function() { hasSent = false; sendCount = 0; };
 
-function el(id){ return document.getElementById(id); }
+function el(id) { return document.getElementById(id); }
 
 function overDropZone(x, y) {
   var r = dropZone.getBoundingClientRect();
@@ -541,7 +753,7 @@ function smoothCursor(lm) {
   var tip = lm[8];
   var rx = (1 - tip.x) * window.innerWidth;
   var ry = tip.y * window.innerHeight;
-  var f  = CFG.smoothing;
+  var f = CFG.smoothing;
   gx = gx*f + rx*(1-f);
   gy = gy*f + ry*(1-f);
   return { x: gx, y: gy };
@@ -558,20 +770,20 @@ function detectPush(lm) {
 }
 
 function onPush(pos) {
-  var now   = Date.now();
+  var now = Date.now();
   var flash = el("gFlash");
   var badge = el("gBadge");
   var on_dz = overDropZone(pos.x, pos.y);
 
   flash.style.opacity = "1";
-  setTimeout(function(){ flash.style.opacity = "0"; }, 140);
+  setTimeout(function() { flash.style.opacity = "0"; }, 140);
 
   if (pushCount === 0 || (now - firstPushAt) > CFG.doublePushMs) {
     pushCount = 1; firstPushAt = now;
     badge.textContent = "👆 1"; badge.style.opacity = "1";
     if (on_dz) dropZone.classList.add("gesture-hover");
     clearTimeout(pushTimer);
-    pushTimer = setTimeout(function(){
+    pushTimer = setTimeout(function() {
       pushCount = 0; firstPushAt = null; badge.style.opacity = "0";
       dropZone.classList.remove("gesture-hover");
     }, CFG.doublePushMs);
@@ -580,26 +792,19 @@ function onPush(pos) {
     clearTimeout(pushTimer);
     dropZone.classList.remove("gesture-hover");
     badge.textContent = "✅"; badge.style.opacity = "1";
-    setTimeout(function(){ badge.style.opacity = "0"; }, 700);
-
+    setTimeout(function() { badge.style.opacity = "0"; }, 700);
     if (on_dz) {
       write("👆 Double-push — opening file picker", "info");
-      var gb = document.getElementById("ghostPickerBtn");
-      var gi = document.getElementById("ghostFileInput");
-      gb.style.left          = (pos.x - 30) + "px";
-      gb.style.top           = (pos.y - 30) + "px";
-      gb.style.width         = "60px";
-      gb.style.height        = "60px";
+      var gb = el("ghostPickerBtn");
+      var gi = el("ghostFileInput");
+      gb.style.left = (pos.x - 30) + "px";
+      gb.style.top  = (pos.y - 30) + "px";
+      gb.style.width = "60px"; gb.style.height = "60px";
       gb.style.pointerEvents = "auto";
-      gi.dispatchEvent(new MouseEvent("click", {
-        bubbles: true, cancelable: true,
-        clientX: pos.x, clientY: pos.y,
-        view: window
-      }));
-      setTimeout(function(){
+      gi.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: pos.x, clientY: pos.y, view: window }));
+      setTimeout(function() {
         gb.style.pointerEvents = "none";
-        gb.style.width  = "1px";
-        gb.style.height = "1px";
+        gb.style.width = "1px"; gb.style.height = "1px";
       }, 500);
     } else {
       fireClick(pos);
@@ -613,16 +818,16 @@ function fireClick(pos) {
   rip.style.display = "block"; rip.style.left = x+"px"; rip.style.top = y+"px";
   rip.style.opacity = "1"; rip.style.transition = "none";
   rip.style.transform = "translate(-50%,-50%) scale(0)";
-  requestAnimationFrame(function(){
+  requestAnimationFrame(function() {
     rip.style.transition = "transform .38s ease-out, opacity .38s ease-out";
-    rip.style.transform  = "translate(-50%,-50%) scale(1)";
-    rip.style.opacity    = "0";
+    rip.style.transform = "translate(-50%,-50%) scale(1)";
+    rip.style.opacity = "0";
   });
-  setTimeout(function(){ rip.style.display = "none"; }, 420);
+  setTimeout(function() { rip.style.display = "none"; }, 420);
   var target = document.elementFromPoint(x, y);
   if (target) {
-    target.dispatchEvent(new MouseEvent("click",{ bubbles:true, cancelable:true, clientX:x, clientY:y }));
-    write("👆 Click → " + target.tagName.toLowerCase() + (target.id?"#"+target.id:""), "info");
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+    write("👆 Click → " + target.tagName.toLowerCase() + (target.id ? "#"+target.id : ""), "info");
   }
 }
 
@@ -651,14 +856,14 @@ function handleGesture(gesture, pos, lm) {
 
   if (gesture === "fist") {
     grabCount++; sendCount = 0;
-    cursor.style.background = "rgba(255,77,109,.9)";
-    cursor.style.boxShadow  = "0 0 18px rgba(255,77,109,.8)";
+    cursor.style.background = "#e07a3a";
+    cursor.style.boxShadow  = "0 0 18px rgba(224,122,58,0.6)";
     cursor.style.transform  = "translate(-50%,-50%) scale(1.4)";
     if (grabCount >= CFG.grabFrames && !isGrabbing) {
       if (gestureState.filesReady) {
         isGrabbing = true; hasSent = false;
-        label.textContent = "✊ Grabbed! Other device — open palm to receive";
-        write("✊ Grabbed — waiting for receiver to open palm!", "info");
+        label.textContent = "✊ Grabbed — other device open palm";
+        write("✊ Grabbed — waiting for receiver!", "info");
         socket.emit("grab-gesture", { to: peerId });
       } else {
         label.textContent = "⚠️ Pick a file first";
@@ -666,23 +871,23 @@ function handleGesture(gesture, pos, lm) {
     }
   } else if (gesture === "open" && !isGrabbing) {
     sendCount++; grabCount = 0;
-    cursor.style.background = "rgba(74,222,128,.9)";
-    cursor.style.boxShadow  = "0 0 18px rgba(74,222,128,.8)";
+    cursor.style.background = "#2d6a4f";
+    cursor.style.boxShadow  = "0 0 18px rgba(45,106,79,0.6)";
     cursor.style.transform  = "translate(-50%,-50%) scale(1.6)";
     if (sendCount >= CFG.sendFrames && !hasSent) {
       hasSent = true;
       label.textContent = "🖐 Ready to receive!";
-      write("🖐 Open palm detected — signalling sender!", "info");
+      write("🖐 Open palm — signalling sender!", "info");
       socket.emit("ready-gesture", { to: peerId });
-      setTimeout(function(){
+      setTimeout(function() {
         cursor.style.transform = "translate(-50%,-50%) scale(1)";
         label.textContent = "👆 Point to aim";
       }, 1200);
     }
   } else {
     grabCount = 0; sendCount = 0;
-    cursor.style.background = "rgba(120,220,255,.82)";
-    cursor.style.boxShadow  = "0 0 14px rgba(120,220,255,.8)";
+    cursor.style.background = "rgba(45,106,79,0.85)";
+    cursor.style.boxShadow  = "0 0 14px rgba(45,106,79,0.5)";
     cursor.style.transform  = "translate(-50%,-50%) scale(1)";
     if      (isGrabbing)              label.textContent = "✊ Holding — other device open palm";
     else if (gestureState.filesReady) label.textContent = "✊ Fist to grab & send";
@@ -694,29 +899,29 @@ function handleGesture(gesture, pos, lm) {
 function drawSkeleton(canvas, lm, gesture) {
   var ctx = canvas.getContext("2d");
   var w = canvas.width, h = canvas.height;
-  ctx.fillStyle = "#000"; ctx.fillRect(0,0,w,h);
-  var color = gesture==="fist" ? "#ff4d6d" : gesture==="open" ? "#4ade80" : "#78dcff";
+  ctx.fillStyle = "#f7f6f3"; ctx.fillRect(0,0,w,h);
+  var color = gesture==="fist" ? "#e07a3a" : gesture==="open" ? "#2d6a4f" : "#6b6860";
   var bones = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
                [0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
                [0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
-  ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.shadowColor=color; ctx.shadowBlur=8; ctx.globalAlpha=0.9;
+  ctx.strokeStyle=color; ctx.lineWidth=2; ctx.globalAlpha=0.8;
   bones.forEach(function(b){
-    ctx.beginPath(); ctx.moveTo(lm[b[0]].x*w,lm[b[0]].y*h); ctx.lineTo(lm[b[1]].x*w,lm[b[1]].y*h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(lm[b[0]].x*w,lm[b[0]].y*h);
+    ctx.lineTo(lm[b[1]].x*w,lm[b[1]].y*h); ctx.stroke();
   });
-  ctx.shadowBlur=14;
   lm.forEach(function(p,i){
-    ctx.beginPath(); ctx.arc(p.x*w,p.y*h,i===8?7:4,0,Math.PI*2);
-    ctx.fillStyle=i===8?"#fff":color; ctx.globalAlpha=1; ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x*w,p.y*h,i===8?6:3,0,Math.PI*2);
+    ctx.fillStyle=i===8?"#1a1916":color; ctx.globalAlpha=1; ctx.fill();
   });
-  ctx.shadowBlur=0; ctx.globalAlpha=1;
+  ctx.globalAlpha=1;
 }
 
 function buildUI() {
   var box = document.createElement("div");
   box.id = "gBox";
-  box.style.cssText = "position:fixed;bottom:20px;right:20px;width:220px;height:165px;" +
-    "border-radius:12px;overflow:hidden;border:2px solid rgba(120,220,255,.32);" +
-    "background:#000;z-index:1000;box-shadow:0 4px 24px rgba(0,0,0,.6);";
+  box.style.cssText = "position:fixed;bottom:20px;right:20px;width:200px;height:150px;" +
+    "border-radius:14px;overflow:hidden;border:1px solid #e8e6e0;" +
+    "background:#f7f6f3;z-index:1000;box-shadow:0 4px 24px rgba(0,0,0,0.1);";
 
   var vid = document.createElement("video");
   vid.id="gVideo"; vid.autoplay=true; vid.playsInline=true; vid.muted=true;
@@ -724,23 +929,23 @@ function buildUI() {
 
   var cvs = document.createElement("canvas");
   cvs.id="gCanvas";
-  cvs.style.cssText="position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1);background:#000;";
+  cvs.style.cssText="position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1);";
 
   var flash = document.createElement("div");
   flash.id="gFlash";
-  flash.style.cssText="position:absolute;inset:0;background:rgba(120,220,255,.17);border-radius:12px;opacity:0;pointer-events:none;transition:opacity .12s;";
+  flash.style.cssText="position:absolute;inset:0;background:rgba(45,106,79,0.12);border-radius:14px;opacity:0;pointer-events:none;transition:opacity .12s;";
 
   var badge = document.createElement("div");
   badge.id="gBadge";
-  badge.style.cssText="position:absolute;top:5px;left:7px;font-size:11px;color:#78dcff;font-family:sans-serif;opacity:0;transition:opacity .18s;";
+  badge.style.cssText="position:absolute;top:5px;left:7px;font-size:11px;color:#2d6a4f;font-family:'DM Sans',sans-serif;opacity:0;transition:opacity .18s;font-weight:500;";
 
   var debug = document.createElement("div");
   debug.id="gDebug";
-  debug.style.cssText="position:absolute;top:5px;right:6px;font-size:10px;color:rgba(255,255,255,.32);font-family:sans-serif;";
+  debug.style.cssText="position:absolute;top:5px;right:6px;font-size:10px;color:#a8a69f;font-family:'DM Sans',sans-serif;";
 
   var label = document.createElement("div");
   label.id="gLabel";
-  label.style.cssText="position:absolute;bottom:5px;left:0;right:0;text-align:center;font-size:11px;color:#78dcff;font-family:sans-serif;text-shadow:0 1px 3px #000;";
+  label.style.cssText="position:absolute;bottom:5px;left:0;right:0;text-align:center;font-size:11px;color:#2d6a4f;font-family:'DM Sans',sans-serif;font-weight:500;";
   label.textContent="Click ✋ to start";
 
   [vid,cvs,flash,badge,debug,label].forEach(function(n){ box.appendChild(n); });
@@ -748,24 +953,25 @@ function buildUI() {
 
   var btn = document.createElement("button");
   btn.id="gToggle"; btn.textContent="✋ Gesture OFF";
-  btn.style.cssText="position:fixed;bottom:196px;right:20px;padding:8px 16px;" +
-    "background:rgba(120,220,255,.1);border:1px solid rgba(120,220,255,.32);" +
-    "border-radius:8px;color:#78dcff;font-size:13px;cursor:pointer;z-index:1001;font-weight:600;";
+  btn.style.cssText="position:fixed;bottom:190px;right:20px;padding:8px 16px;" +
+    "background:#fff;border:1px solid #e8e6e0;" +
+    "border-radius:10px;color:#1a1916;font-size:13px;cursor:pointer;z-index:1001;font-weight:500;" +
+    "font-family:'DM Sans',sans-serif;box-shadow:0 2px 8px rgba(0,0,0,0.06);";
   btn.addEventListener("click", toggleGesture);
   document.body.appendChild(btn);
 
   var cur = document.createElement("div");
   cur.id="gCursor";
-  cur.style.cssText="position:fixed;width:26px;height:26px;border-radius:50%;" +
-    "background:rgba(120,220,255,.85);border:2px solid #fff;pointer-events:none;" +
+  cur.style.cssText="position:fixed;width:24px;height:24px;border-radius:50%;" +
+    "background:rgba(45,106,79,0.85);border:2px solid #fff;pointer-events:none;" +
     "z-index:9999;transform:translate(-50%,-50%);display:none;" +
-    "box-shadow:0 0 14px rgba(120,220,255,.9);transition:background .1s,box-shadow .1s,transform .12s;";
+    "box-shadow:0 0 12px rgba(45,106,79,0.5);transition:background .1s,box-shadow .1s,transform .12s;";
   document.body.appendChild(cur);
 
   var rip = document.createElement("div");
   rip.id="gRipple";
-  rip.style.cssText="position:fixed;width:66px;height:66px;border-radius:50%;" +
-    "border:3px solid rgba(120,220,255,.85);pointer-events:none;z-index:9998;" +
+  rip.style.cssText="position:fixed;width:60px;height:60px;border-radius:50%;" +
+    "border:2px solid rgba(45,106,79,0.6);pointer-events:none;z-index:9998;" +
     "transform:translate(-50%,-50%) scale(0);display:none;opacity:0;";
   document.body.appendChild(rip);
 }
@@ -786,19 +992,14 @@ async function startGesture() {
     label.textContent = "Camera error ❌";
     write("Camera: " + err.message, "error");
     el("gToggle").textContent = "✋ Gesture OFF";
-    el("gToggle").style.background = "rgba(120,220,255,.1)";
     return;
   }
 
   label.textContent = "Loading model...";
 
-  var hands = new Hands({
-    locateFile: function(f){ return "/mediapipe/" + f; }
-  });
-
+  var hands = new Hands({ locateFile: function(f){ return "/mediapipe/" + f; } });
   hands.setOptions({
-    maxNumHands:            1,
-    modelComplexity:        1,
+    maxNumHands: 1, modelComplexity: 1,
     minDetectionConfidence: CFG.minDetection,
     minTrackingConfidence:  CFG.minTracking
   });
@@ -814,7 +1015,7 @@ async function startGesture() {
       cursor.style.display = "block";
       handleGesture(gesture, pos, lm);
     } else {
-      ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle="#f7f6f3"; ctx.fillRect(0,0,canvas.width,canvas.height);
       cursor.style.display = "none";
       el("gDebug").textContent = "";
       label.textContent = "🖐️ Show your hand";
@@ -832,30 +1033,30 @@ async function startGesture() {
 
   camera.start();
   running = true;
-  label.textContent        = "👆 Point to aim";
-  cursor.style.display     = "block";
-  el("gToggle").textContent      = "✋ Gesture ON";
-  el("gToggle").style.background = "rgba(120,220,255,.22)";
+  label.textContent = "👆 Point to aim";
+  cursor.style.display = "block";
+  el("gToggle").textContent = "✋ Gesture ON";
+  el("gToggle").style.background = "#e8f5ee";
+  el("gToggle").style.color = "#2d6a4f";
   write("Gesture control active ✔", "success");
 }
 
 function toggleGesture() {
   if (!running) {
-    el("gToggle").textContent      = "Loading...";
-    el("gToggle").style.background = "rgba(120,220,255,.08)";
+    el("gToggle").textContent = "Loading...";
     startGesture();
   } else {
     running = false;
-    el("gCursor").style.display    = "none";
-    el("gLabel").textContent       = "Gesture OFF";
-    el("gToggle").textContent      = "✋ Gesture OFF";
-    el("gToggle").style.background = "rgba(120,220,255,.1)";
+    el("gCursor").style.display = "none";
+    el("gLabel").textContent = "Gesture OFF";
+    el("gToggle").textContent = "✋ Gesture OFF";
+    el("gToggle").style.background = "#fff";
+    el("gToggle").style.color = "#1a1916";
     write("Gesture OFF", "info");
   }
 }
 
 window.addEventListener("DOMContentLoaded", buildUI);
-
 })();
 </script>
 
