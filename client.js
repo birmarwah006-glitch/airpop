@@ -1,4 +1,4 @@
-// client.js — AirPop Live (Streaming Rewrite)
+// client.js — AirPop Live (Streaming Rewrite with Multi-File & Folder Queue Support)
 
 const ICE_SERVERS = {
   iceServers: [
@@ -13,19 +13,16 @@ const ICE_SERVERS = {
 };
 
 // ── Chunk & backpressure tuning ───────────────────────────────
-// 64KB chunks: smaller slices = faster first-byte, smoother progress bar
-const CHUNK_SIZE  = 64 * 1024;
-// Pause sending when the DC buffer exceeds 1 MB
-const BUFFER_HIGH = 1 * 1024 * 1024;
-// Resume once it drains back to 128 KB
-const BUFFER_LOW  = 128 * 1024;
+const CHUNK_SIZE  = 64 * 1024; // 64KB slices for smooth data streaming
+const BUFFER_HIGH = 1 * 1024 * 1024; // Pause streaming at 1MB buffered
+const BUFFER_LOW  = 128 * 1024; // Resume streaming at 128KB remaining
 
 let socket;
 let pc          = null;
 let dataChannel = null;
 let peerId      = null;
 
-// Receive state — track bytes so we can show receiver-side progress
+// Receive state — track incoming streaming bytes
 let receiveBuffer = { chunks: [], meta: null, received: 0 };
 
 // ── UI Elements ───────────────────────────────────────────────
@@ -45,7 +42,7 @@ const sendProgressLabel= document.getElementById("sendProgressLabel");
 const logEl            = document.getElementById("log");
 const peerStatus       = document.getElementById("peerStatus");
 
-// Receiver progress elements — create them if index.html doesn't have them yet
+// Receiver progress elements
 let recvProgressWrap  = document.getElementById("recvProgressWrap");
 let recvProgressBar   = document.getElementById("recvProgressBar");
 let recvProgressLabel = document.getElementById("recvProgressLabel");
@@ -67,7 +64,6 @@ if (!recvProgressWrap) {
   recvProgressWrap.appendChild(recvProgressBar);
   recvProgressWrap.appendChild(recvProgressLabel);
 
-  // Inject after receiveCard if it exists, else after sendCard
   const anchor = receiveCard || sendCard;
   if (anchor && anchor.parentNode) {
     anchor.parentNode.insertBefore(recvProgressWrap, anchor.nextSibling);
@@ -209,8 +205,10 @@ function setupDataChannel(dc) {
         receiveBuffer = { chunks: [], meta: msg, received: 0 };
         recvProgressWrap.style.display = "block";
         recvProgressBar.style.width    = "0%";
-        recvProgressLabel.textContent  = `Receiving ${msg.name} (${formatSize(msg.size)})…`;
-        write(`Receiving: ${msg.name} (${formatSize(msg.size)})`, "info");
+        
+        const displayName = msg.relativePath || msg.name;
+        recvProgressLabel.textContent  = `Receiving ${displayName} (${formatSize(msg.size)})…`;
+        write(`Receiving: ${displayName} (${formatSize(msg.size)})`, "info");
         receiveCard.classList.remove("hidden");
 
       } else if (msg.type === "file-end") {
@@ -218,18 +216,18 @@ function setupDataChannel(dc) {
       }
 
     } else {
-      // Binary chunk — update receiver progress bar in real time
       receiveBuffer.chunks.push(data);
       receiveBuffer.received += data.byteLength;
 
       if (receiveBuffer.meta) {
+        const displayName = receiveBuffer.meta.relativePath || receiveBuffer.meta.name;
         const pct = Math.min(
           100,
           Math.round((receiveBuffer.received / receiveBuffer.meta.size) * 100)
         );
         recvProgressBar.style.width   = pct + "%";
         recvProgressLabel.textContent =
-          `${receiveBuffer.meta.name} — ${pct}% `+
+          `${displayName} — ${pct}% `+
           `(${formatSize(receiveBuffer.received)} / ${formatSize(receiveBuffer.meta.size)})`;
       }
     }
@@ -240,33 +238,43 @@ function finalizeFile() {
   const { chunks, meta } = receiveBuffer;
   const blob = new Blob(chunks, { type: meta.fileType });
   const url  = URL.createObjectURL(blob);
+  
+  // Uses directory structure relative paths if uploading entire folders
+  const displayName = meta.relativePath || meta.name;
 
   if (meta.fileType.startsWith("image/")) {
-    const img   = document.createElement("img");
-    img.src     = url;
-    img.title   = meta.name;
-    receivedArea.appendChild(img);
+    const item = document.createElement("div");
+    item.className = "file-item visual-media-item";
+    item.style.margin = "8px 0";
+    item.innerHTML = `
+      🖼️ <a href="${url}" download="${displayName}">${displayName}</a> (${formatSize(meta.size)})
+      <br><img src="${url}" title="${displayName}" style="max-width: 100%; max-height: 200px; border-radius: 6px; margin-top: 6px; display: block;">
+    `;
+    receivedArea.appendChild(item);
   } else if (meta.fileType.startsWith("video/")) {
-    const video   = document.createElement("video");
-    video.src     = url;
-    video.controls= true;
-    receivedArea.appendChild(video);
+    const item = document.createElement("div");
+    item.className = "file-item visual-media-item";
+    item.style.margin = "8px 0";
+    item.innerHTML = `
+      🎬 <a href="${url}" download="${displayName}">${displayName}</a> (${formatSize(meta.size)})
+      <br><video src="${url}" controls style="max-width: 100%; max-height: 250px; border-radius: 6px; margin-top: 6px; display: block;"></video>
+    `;
+    receivedArea.appendChild(item);
   } else {
     const item = document.createElement("div");
     item.className = "file-item";
     item.innerHTML =
-      `📄 <a href="${url}" download="${meta.name}">${meta.name}</a> (${formatSize(meta.size)})`;
+      `📄 <a href="${url}" download="${displayName}">${displayName}</a> (${formatSize(meta.size)})`;
     receivedArea.appendChild(item);
   }
 
-  write(`Received: ${meta.name} ✔`, "success");
+  write(`Received: ${displayName} ✔`, "success");
 
-  // Hide receiver progress after a moment
   setTimeout(() => {
     recvProgressWrap.style.display = "none";
     recvProgressBar.style.width    = "0%";
     recvProgressLabel.textContent  = "";
-  }, 2000);
+  }, 1000);
 
   receiveBuffer = { chunks: [], meta: null, received: 0 };
 }
@@ -278,7 +286,6 @@ function formatSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-// Event-driven drain: resolves when bufferedAmount drops below BUFFER_LOW
 function waitForDrain(dc) {
   return new Promise(resolve => {
     dc.bufferedAmountLowThreshold = BUFFER_LOW;
@@ -289,69 +296,74 @@ function waitForDrain(dc) {
   });
 }
 
-// ── Send File (streaming — no full file read upfront) ─────────
-async function sendFile(file) {
-  if (!dataChannel || dataChannel.readyState !== "open") {
-    write("No peer connected yet.", "error");
-    return;
-  }
-
-  const fileType    = file.type || "application/octet-stream";
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-  sendProgressWrap.style.display = "block";
-  sendProgressBar.style.width    = "0%";
-  sendProgressLabel.textContent  = `${file.name} — preparing…`;
-
-  // ✅ Tell receiver what's coming
-  dataChannel.send(JSON.stringify({
-    type: "file-start",
-    name: file.name,
-    size: file.size,
-    fileType,
-  }));
-
-  write(`Sending: ${file.name} (${formatSize(file.size)})`, "info");
-
-  // ✅ Stream chunk by chunk using File.slice() — never loads full file into RAM
-  for (let i = 0; i < totalChunks; i++) {
-    const start  = i * CHUNK_SIZE;
-    const end    = Math.min(start + CHUNK_SIZE, file.size);
-
-    // file.slice() is lazy — only this chunk is read from disk right now
-    const chunk  = await file.slice(start, end).arrayBuffer();
-
-    // Backpressure: wait if the send buffer is too full
-    if (dataChannel.bufferedAmount > BUFFER_HIGH) {
-      await waitForDrain(dataChannel);
+// ── Send File Core (Returns a Promise for Queue Synchronization) ──
+function sendFile(file) {
+  return new Promise(async (resolve) => {
+    if (!dataChannel || dataChannel.readyState !== "open") {
+      write("No peer connected yet.", "error");
+      return resolve();
     }
 
-    dataChannel.send(chunk);
+    const fileType    = file.type || "application/octet-stream";
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const displayName = file.webkitRelativePath || file.name;
 
-    // Update progress bar immediately after each chunk
-    const pct = Math.round(((i + 1) / totalChunks) * 100);
-    sendProgressBar.style.width    = pct + "%";
-    sendProgressLabel.textContent  =
-      `${file.name} — ${pct}% (${formatSize(end)} / ${formatSize(file.size)})`;
-  }
-
-  dataChannel.send(JSON.stringify({ type: "file-end" }));
-  write(`Sent: ${file.name} ✔`, "success");
-
-  setTimeout(() => {
-    sendProgressWrap.style.display = "none";
+    sendProgressWrap.style.display = "block";
     sendProgressBar.style.width    = "0%";
-    sendProgressLabel.textContent  = "";
-  }, 2000);
+    sendProgressLabel.textContent  = `${displayName} — preparing…`;
+
+    // Send metadata out with path information attached
+    dataChannel.send(JSON.stringify({
+      type: "file-start",
+      name: file.name,
+      size: file.size,
+      fileType,
+      relativePath: file.webkitRelativePath || file.name
+    }));
+
+    write(`Sending: ${displayName} (${formatSize(file.size)})`, "info");
+
+    for (let i = 0; i < totalChunks; i++) {
+      const start  = i * CHUNK_SIZE;
+      const end    = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk  = await file.slice(start, end).arrayBuffer();
+
+      if (dataChannel.bufferedAmount > BUFFER_HIGH) {
+        await waitForDrain(dataChannel);
+      }
+
+      dataChannel.send(chunk);
+
+      const pct = Math.round(((i + 1) / totalChunks) * 100);
+      sendProgressBar.style.width    = pct + "%";
+      sendProgressLabel.textContent  =
+        `${displayName} — ${pct}% (${formatSize(end)} / ${formatSize(file.size)})`;
+    }
+
+    dataChannel.send(JSON.stringify({ type: "file-end" }));
+    write(`Sent: ${displayName} ✔`, "success");
+
+    setTimeout(() => {
+      sendProgressWrap.style.display = "none";
+      sendProgressBar.style.width    = "0%";
+      sendProgressLabel.textContent  = "";
+    }, 1000);
+
+    // Short cool down interval between separate items inside data stream
+    setTimeout(resolve, 150);
+  });
 }
 
-// ── Gesture Bridge ────────────────────────────────────────────
+// ── Gesture Bridge (Now Processes Queued Items Synchronously) ──
 const gestureState = { filesReady: false };
 
-function gestureSendFiles() {
+async function gestureSendFiles() {
   const files = fileInput.files;
   if (files && files.length > 0) {
-    [...files].forEach(sendFile);
+    write(`Processing bulk transfer of ${files.length} items...`, "info");
+    for (const file of files) {
+      await sendFile(file);
+    }
     fileInput.value           = "";
     gestureState.filesReady   = false;
     dropZone.classList.remove("file-ready");
@@ -373,20 +385,27 @@ disconnectBtn.addEventListener("click", () => {
   write("Disconnected from peer", "info");
 });
 
-// ── Drop Zone ─────────────────────────────────────────────────
-dropZone.addEventListener("dragover",  e  => { e.preventDefault(); dropZone.classList.add("dragover"); });
-dropZone.addEventListener("dragleave", ()  => dropZone.classList.remove("dragover"));
-dropZone.addEventListener("drop",      e  => {
+// ── Drop Zone (Now Processes Drag-and-Drop Bulk Queues) ─────────
+dropZone.addEventListener("dragover",  e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+dropZone.addEventListener("drop",      async e => {
   e.preventDefault();
   dropZone.classList.remove("dragover");
-  [...e.dataTransfer.files].forEach(sendFile);
+  
+  const files = [...e.dataTransfer.files];
+  if (files.length > 0) {
+    write(`Processing drop upload queue containing ${files.length} items...`, "info");
+    for (const file of files) {
+      await sendFile(file);
+    }
+  }
 });
 
 fileInput.addEventListener("change", () => {
   if (fileInput.files.length > 0) {
     gestureState.filesReady = true;
     dropZone.classList.add("file-ready");
-    write(`${fileInput.files.length} file(s) staged — use gesture or drop to send`, "info");
+    write(`${fileInput.files.length} item(s) staged — use gesture or trigger upload sequence`, "info");
   }
 });
 
