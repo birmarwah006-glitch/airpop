@@ -5,8 +5,6 @@
 <meta charset="UTF-8">
 <meta name="description" content="Airpop is a free, cross-platform, gesture-based file sharing system. Easily transfer files between iOS, Android, and other devices with a simple, intuitive interface.">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Airpop — Gesture File Transfer</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
 <style>
@@ -127,6 +125,14 @@ nav {
   font-weight: 300;
   max-width: 420px;
   margin: 0 auto;
+}
+
+.steps {
+  display: flex;
+  gap: 12px;
+  max-width: 560px;
+  margin: 40px auto 0;
+  padding: 0 24px;
 }
 
 .steps {
@@ -432,7 +438,6 @@ nav {
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 
-<!-- CLIENT -->
 <script>
 var ICE_SERVERS = {
   iceServers: [
@@ -522,9 +527,12 @@ function clearStaged() {
   fileInput.value = "";
 }
 
-function sendStagedFiles() {
+// ── FIXED: processes staged files sequentially via loop ──
+async function sendStagedFiles() {
   if (stagedFiles.length === 0) { write("No files staged.", "error"); return; }
-  stagedFiles.forEach(sendFile);
+  for (var i = 0; i < stagedFiles.length; i++) {
+    await sendFile(stagedFiles[i]);
+  }
   clearStaged();
 }
 
@@ -613,6 +621,7 @@ function setupDC(chan) {
         finalizeFile();
       }
     } else {
+      if (!rxBuf || !rxBuf.meta) return;
       rxBuf.chunks.push(e.data);
       rxBuf.received += e.data.byteLength;
     }
@@ -620,22 +629,43 @@ function setupDC(chan) {
 }
 
 function finalizeFile() {
-  var meta = rxBuf.meta;
-  var blob = new Blob(rxBuf.chunks, { type: meta.fileType });
+  if (!rxBuf || !rxBuf.meta) return;
+
+  var meta = Object.assign({}, rxBuf.meta);
+  var chunks = rxBuf.chunks.slice();
+
+  rxBuf = { chunks: [], meta: null, received: 0 };
+
+  if (!meta.fileType) return;
+
+  var blob = new Blob(chunks, { type: meta.fileType });
   var url  = URL.createObjectURL(blob);
+
   if (meta.fileType.startsWith("image/")) {
-    var img = document.createElement("img"); img.src = url; img.title = meta.name;
+    var img = document.createElement("img"); 
+    img.src = url; 
+    img.title = meta.name;
+    img.style.maxWidth = "100%";
+    img.style.borderRadius = "8px";
+    img.style.marginTop = "8px";
+    img.style.display = "block";
     receivedArea.appendChild(img);
   } else if (meta.fileType.startsWith("video/")) {
-    var v = document.createElement("video"); v.src = url; v.controls = true;
+    var v = document.createElement("video"); 
+    v.src = url; 
+    v.controls = true;
+    v.style.maxWidth = "100%";
+    v.style.borderRadius = "8px";
+    v.style.marginTop = "8px";
+    v.style.display = "block";
     receivedArea.appendChild(v);
   } else {
-    var d = document.createElement("div"); d.className = "file-item";
-    d.innerHTML = "📄 <a href='" + url + "' download='" + meta.name + "'>" + meta.name + "</a> <span style='color:var(--text-3);margin-left:auto;font-size:11px;'>" + fmtSize(meta.size) + "</span>";
+    var d = document.createElement("div"); 
+    d.className = "file-item";
+    d.innerHTML = "📄 <a href='" + url + "' download='" + meta.name + "'>" + meta.name + "</a> <span style='color:var(--text-3);margin-left:auto;font-size:11px;'> " + fmtSize(meta.size) + "</span>";
     receivedArea.appendChild(d);
   }
   write("Received: " + meta.name + " ✔", "success");
-  rxBuf = { chunks: [], meta: null, received: 0 };
 }
 
 function fmtSize(b) {
@@ -644,7 +674,6 @@ function fmtSize(b) {
   return (b/1048576).toFixed(1) + " MB";
 }
 
-// ── Event-driven backpressure drain ──
 function waitForDrain(chan) {
   return new Promise(function(resolve) {
     chan.bufferedAmountLowThreshold = BUFFER_LOW;
@@ -655,7 +684,6 @@ function waitForDrain(chan) {
   });
 }
 
-// ── FIXED: streams file chunk by chunk — never loads full file into RAM ──
 async function sendFile(file) {
   if (!dc || dc.readyState !== "open") { write("Data channel not open.", "error"); return; }
   var total = Math.ceil(file.size / CHUNK_SIZE);
@@ -667,9 +695,7 @@ async function sendFile(file) {
   for (var i = 0; i < total; i++) {
     var start = i * CHUNK_SIZE;
     var end   = Math.min(start + CHUNK_SIZE, file.size);
-    // file.slice() reads only this chunk — no full file load
     var chunk = await file.slice(start, end).arrayBuffer();
-    // event-driven backpressure — no busy-wait polling
     if (dc.bufferedAmount > BUFFER_HIGH) {
       await waitForDrain(dc);
     }
@@ -685,6 +711,8 @@ async function sendFile(file) {
     progressBar.style.width = "0";
     progressLbl.textContent = "";
   }, 2000);
+  
+  await new Promise(function(r) { setTimeout(r, 400); });
 }
 
 connectBtn.addEventListener("click",    function() { socket.emit("find-peer"); setState("searching"); write("Searching...", "info"); });
@@ -707,7 +735,6 @@ ghostInput.addEventListener("change", function() { if (ghostInput.files.length >
 initSocket();
 </script>
 
-<!-- GESTURE -->
 <script>
 (function() {
 
@@ -964,105 +991,73 @@ function buildUI() {
   btn.addEventListener("click", toggleGesture);
   document.body.appendChild(btn);
 
-  var cur = document.createElement("div");
-  cur.id="gCursor";
-  cur.style.cssText="position:fixed;width:24px;height:24px;border-radius:50%;" +
-    "background:rgba(45,106,79,0.85);border:2px solid #fff;pointer-events:none;" +
-    "z-index:9999;transform:translate(-50%,-50%);display:none;" +
-    "box-shadow:0 0 12px rgba(45,106,79,0.5);transition:background .1s,box-shadow .1s,transform .12s;";
-  document.body.appendChild(cur);
+  var cursor = document.createElement("div");
+  cursor.id = "gCursor";
+  cursor.style.cssText = "position:fixed;width:24px;height:24px;border-radius:50%;" +
+    "background:rgba(45,106,79,0.85);pointer-events:none;z-index:999999;left:-100px;top:-100px;" +
+    "box-shadow:0 0 14px rgba(45,106,79,0.5);transition:transform 0.12s ease-out, background 0.15s;";
+  document.body.appendChild(cursor);
 
   var rip = document.createElement("div");
-  rip.id="gRipple";
-  rip.style.cssText="position:fixed;width:60px;height:60px;border-radius:50%;" +
-    "border:2px solid rgba(45,106,79,0.6);pointer-events:none;z-index:9998;" +
-    "transform:translate(-50%,-50%) scale(0);display:none;opacity:0;";
+  rip.id = "gRipple";
+  rip.style.cssText = "position:fixed;width:50px;height:50px;border-radius:50%;" +
+    "border:3px solid #2d6a4f;pointer-events:none;z-index:999998;display:none;" +
+    "transform:translate(-50%,-50%) scale(0);opacity:0;";
   document.body.appendChild(rip);
 }
 
-async function startGesture() {
-  var vid    = el("gVideo");
-  var canvas = el("gCanvas");
-  var cursor = el("gCursor");
-  var label  = el("gLabel");
-
-  try {
-    var stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:"user", width:640, height:480 } });
-    vid.srcObject = stream;
-    await new Promise(function(resolve){ vid.onloadedmetadata = resolve; });
-    canvas.width  = vid.videoWidth  || 640;
-    canvas.height = vid.videoHeight || 480;
-  } catch(err) {
-    label.textContent = "Camera error ❌";
-    write("Camera: " + err.message, "error");
-    el("gToggle").textContent = "✋ Gesture OFF";
-    return;
+function toggleGesture() {
+  var btn = el("gToggle");
+  if (!running) {
+    running = true; btn.textContent = "✋ Gesture ON"; btn.style.background = "#e8f5ee"; btn.style.color = "#2d6a4f";
+    initMediaPipe();
+  } else {
+    running = false; btn.textContent = "✋ Gesture OFF"; btn.style.background = "#fff"; btn.style.color = "#1a1916";
+    if (window._camera) { window._camera.stop(); window._camera = null; }
+    el("gLabel").textContent = "Click ✋ to start";
+    el("gCursor").style.left = "-100px"; el("gCursor").style.top = "-100px";
   }
+}
 
-  label.textContent = "Loading model...";
+function initMediaPipe() {
+  var video = el("gVideo");
+  var canvas = el("gCanvas");
+  el("gLabel").textContent = "Starting camera…";
 
-  var hands = new Hands({ locateFile: function(f){ return "/mediapipe/" + f; } });
-  hands.setOptions({
-    maxNumHands: 1, modelComplexity: 1,
-    minDetectionConfidence: CFG.minDetection,
-    minTrackingConfidence:  CFG.minTracking
-  });
-
-  hands.onResults(function(res) {
+  var hands = new Hands({ locateFile: function(f){ return "https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+f; } });
+  hands.setOptions({ maxNumHands:1, modelComplexity:1, minDetectionConfidence:CFG.minDetection, minTrackingConfidence:CFG.minTracking });
+  hands.onResults(function(r) {
     if (!running) return;
-    var ctx = canvas.getContext("2d");
-    if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
-      var lm      = res.multiHandLandmarks[0];
-      var gesture = classify(lm);
-      var pos     = smoothCursor(lm);
-      drawSkeleton(canvas, lm, gesture);
-      cursor.style.display = "block";
-      handleGesture(gesture, pos, lm);
+    if (r.multiHandLandmarks && r.multiHandLandmarks.length > 0) {
+      var lm = r.multiHandLandmarks[0];
+      var g  = classify(lm);
+      var pos = smoothCursor(lm);
+      handleGesture(g, pos, lm);
+      drawSkeleton(canvas, lm, g);
     } else {
-      ctx.fillStyle="#f7f6f3"; ctx.fillRect(0,0,canvas.width,canvas.height);
-      cursor.style.display = "none";
-      el("gDebug").textContent = "";
-      label.textContent = "🖐️ Show your hand";
-      dropZone.classList.remove("gesture-hover");
-      grabCount=0; sendCount=0; lastWristZ=null; isGrabbing=false;
+      grabCount = 0; sendCount = 0;
+      el("gDebug").textContent = "NO HAND";
+      el("gLabel").textContent = "Show your hand";
+      var ctx = canvas.getContext("2d"); ctx.clearRect(0,0,canvas.width,canvas.height);
     }
   });
 
-  await hands.initialize();
-
-  var camera = new Camera(vid, {
-    onFrame: async function(){ if (running) await hands.send({ image:vid }); },
-    width: 640, height: 480
+  var cam = new Camera(video, {
+    onFrame: async function() { if (running) await hands.send({ image: video }); },
+    width: 320, height: 240
   });
-
-  camera.start();
-  running = true;
-  label.textContent = "👆 Point to aim";
-  cursor.style.display = "block";
-  el("gToggle").textContent = "✋ Gesture ON";
-  el("gToggle").style.background = "#e8f5ee";
-  el("gToggle").style.color = "#2d6a4f";
-  write("Gesture control active ✔", "success");
+  cam.start().then(function(){
+    window._camera = cam;
+    el("gLabel").textContent = "👆 Point to aim";
+  }).catch(function(err){
+    write("Camera access failed: " + err.message, "error");
+    toggleGesture();
+  });
 }
 
-function toggleGesture() {
-  if (!running) {
-    el("gToggle").textContent = "Loading...";
-    startGesture();
-  } else {
-    running = false;
-    el("gCursor").style.display = "none";
-    el("gLabel").textContent = "Gesture OFF";
-    el("gToggle").textContent = "✋ Gesture OFF";
-    el("gToggle").style.background = "#fff";
-    el("gToggle").style.color = "#1a1916";
-    write("Gesture OFF", "info");
-  }
-}
+document.addEventListener("DOMContentLoaded", buildUI);
 
-window.addEventListener("DOMContentLoaded", buildUI);
 })();
 </script>
-
 </body>
 </html>
