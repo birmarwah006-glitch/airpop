@@ -216,28 +216,76 @@ function setupDataChannel(dc) {
       }
 
     } else {
+      // 🟢 SAFETY CHECK: If chunks arrive before file-start metadata is processed, discard or ignore
+      if (!receiveBuffer || !receiveBuffer.meta) return;
+
       receiveBuffer.chunks.push(data);
       receiveBuffer.received += data.byteLength;
 
-      if (receiveBuffer.meta) {
-        const displayName = receiveBuffer.meta.relativePath || receiveBuffer.meta.name;
-        const pct = Math.min(
-          100,
-          Math.round((receiveBuffer.received / receiveBuffer.meta.size) * 100)
-        );
-        recvProgressBar.style.width   = pct + "%";
-        recvProgressLabel.textContent =
-          `${displayName} — ${pct}% `+
-          `(${formatSize(receiveBuffer.received)} / ${formatSize(receiveBuffer.meta.size)})`;
-      }
+      const displayName = receiveBuffer.meta.relativePath || receiveBuffer.meta.name;
+      const pct = Math.min(
+        100,
+        Math.round((receiveBuffer.received / receiveBuffer.meta.size) * 100)
+      );
+      recvProgressBar.style.width   = pct + "%";
+      recvProgressLabel.textContent =
+        `${displayName} — ${pct}% `+
+        `(${formatSize(receiveBuffer.received)} / ${formatSize(receiveBuffer.meta.size)})`;
     }
   };
 }
 
 function finalizeFile() {
-  const { chunks, meta } = receiveBuffer;
+  // 🟢 THREAD-LOCK FIX: Extract values locally right now so future file chunks can't overwrite them
+  const chunks = [...receiveBuffer.chunks];
+  const meta   = { ...receiveBuffer.meta };
+
+  // Clear global receiver buffer immediately so it is instantly vacant for the next incoming stream file
+  receiveBuffer = { chunks: [], meta: null, received: 0 };
+
+  if (!meta || !meta.fileType) return;
+
   const blob = new Blob(chunks, { type: meta.fileType });
   const url  = URL.createObjectURL(blob);
+  const displayName = meta.relativePath || meta.name;
+
+  if (meta.fileType.startsWith("image/")) {
+    const item = document.createElement("div");
+    item.className = "file-item visual-media-item";
+    item.style.margin = "8px 0";
+    item.innerHTML = `
+      🖼️ <a href="${url}" download="${displayName}">${displayName}</a> (${formatSize(meta.size)})
+      <br><img src="${url}" title="${displayName}" style="max-width: 100%; max-height: 200px; border-radius: 6px; margin-top: 6px; display: block;">
+    `;
+    receivedArea.appendChild(item);
+  } else if (meta.fileType.startsWith("video/")) {
+    const item = document.createElement("div");
+    item.className = "file-item visual-media-item";
+    item.style.margin = "8px 0";
+    item.innerHTML = `
+      🎬 <a href="${url}" download="${displayName}">${displayName}</a> (${formatSize(meta.size)})
+      <br><video src="${url}" controls style="max-width: 100%; max-height: 250px; border-radius: 6px; margin-top: 6px; display: block;"></video>
+    `;
+    receivedArea.appendChild(item);
+  } else {
+    const item = document.createElement("div");
+    item.className = "file-item";
+    item.innerHTML =
+      `📄 <a href="${url}" download="${displayName}">${displayName}</a> (${formatSize(meta.size)})`;
+    receivedArea.appendChild(item);
+  }
+
+  write(`Received: ${displayName} ✔`, "success");
+
+  setTimeout(() => {
+    recvProgressWrap.style.display = "none";
+    recvProgressBar.style.width    = "0%";
+    recvProgressLabel.textContent  = "";
+  }, 1000);
+}
+
+    
+          
   
   // Uses directory structure relative paths if uploading entire folders
   const displayName = meta.relativePath || meta.name;
@@ -277,7 +325,7 @@ function finalizeFile() {
   }, 1000);
 
   receiveBuffer = { chunks: [], meta: null, received: 0 };
-}
+
 
 // ── Helpers ───────────────────────────────────────────────────
 function formatSize(bytes) {
