@@ -311,6 +311,8 @@ function sendFile(file) {
     sendProgressWrap.style.display = "block";
     sendProgressBar.style.width    = "0%";
     sendProgressLabel.textContent  = `${displayName} — preparing…`;
+  
+    
 
     // Send metadata out with path information attached
     dataChannel.send(JSON.stringify({
@@ -350,7 +352,7 @@ function sendFile(file) {
     }, 1000);
 
     // Short cool down interval between separate items inside data stream
-    setTimeout(resolve, 150);
+    setTimeout(resolve, 400);
   });
 }
 
